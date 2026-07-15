@@ -33,6 +33,7 @@ from corporidoc.domain import (
     assess_video_quality,
     decode_quality_warnings,
 )
+from corporidoc.ui.video_details_dialog import VideoDetailsDialog
 from corporidoc.ui.video_intake_dialog import VideoIntakeDialog
 
 
@@ -53,6 +54,9 @@ class VideoTab(QWidget):
         self.delete_button = QPushButton("删除所选登记")
         self.delete_button.setEnabled(False)
         self.delete_button.clicked.connect(self.delete_selected_video)
+        self.details_button = QPushButton("查看/修改信息")
+        self.details_button.setEnabled(False)
+        self.details_button.clicked.connect(self.edit_selected_video)
         refresh_button = QPushButton("刷新")
         refresh_button.clicked.connect(self.refresh)
 
@@ -60,6 +64,7 @@ class VideoTab(QWidget):
         controls.addWidget(self.patient_label)
         controls.addStretch()
         controls.addWidget(self.import_button)
+        controls.addWidget(self.details_button)
         controls.addWidget(self.delete_button)
         controls.addWidget(refresh_button)
 
@@ -84,6 +89,7 @@ class VideoTab(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.itemSelectionChanged.connect(self._update_delete_button)
+        self.table.cellDoubleClicked.connect(self.edit_selected_video)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
 
@@ -147,7 +153,54 @@ class VideoTab(QWidget):
 
     def _update_delete_button(self) -> None:
         row = self.table.currentRow()
-        self.delete_button.setEnabled(0 <= row < len(self._videos))
+        enabled = 0 <= row < len(self._videos)
+        self.delete_button.setEnabled(enabled)
+        self.details_button.setEnabled(enabled)
+
+    def edit_selected_video(self, *_: object) -> None:
+        row = self.table.currentRow()
+        if not 0 <= row < len(self._videos):
+            QMessageBox.information(self, "未选择视频", "请先选择一条视频登记记录。")
+            return
+        video = self._videos[row]
+        if video.id is None:
+            QMessageBox.warning(self, "无法修改", "视频登记缺少数据库 ID。")
+            return
+
+        dialog = VideoDetailsDialog(video, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        details = dialog.value()
+        before = (
+            video.camera_view,
+            video.body_side,
+            video.capture_protocol,
+            video.video_notes,
+        )
+        after = (
+            details.camera_view,
+            details.body_side,
+            details.capture_protocol,
+            details.video_notes,
+        )
+        if before == after:
+            QMessageBox.information(self, "没有修改", "采集信息没有发生变化。")
+            return
+
+        try:
+            self.repository.update_video_metadata(
+                video.id,
+                camera_view=details.camera_view,
+                body_side=details.body_side,
+                capture_protocol=details.capture_protocol,
+                video_notes=details.video_notes,
+            )
+        except (KeyError, ValueError) as error:
+            QMessageBox.warning(self, "无法修改", str(error))
+            return
+
+        self.refresh()
+        QMessageBox.information(self, "保存完成", "采集信息已修改并写入审计记录。")
 
     def delete_selected_video(self) -> None:
         row = self.table.currentRow()

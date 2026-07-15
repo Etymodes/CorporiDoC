@@ -164,6 +164,75 @@ def test_repository_rejects_duplicate_video_content(tmp_path: Path) -> None:
     assert recreated.id is not None
 
 
+def test_video_capture_metadata_update_is_limited_and_audited(tmp_path: Path) -> None:
+    repository = PatientRepository(tmp_path / "corporidoc.sqlite3")
+    patient = repository.create_patient(Patient(patient_code="DEMO-EDIT-001"))
+    assert patient.id is not None
+    created = repository.create_video_asset(
+        VideoAsset(
+            patient_id=patient.id,
+            source_path="/source/demo.mp4",
+            filename="demo.mp4",
+            file_sha256="b" * 64,
+            file_size_bytes=2048,
+            extension=".mp4",
+            duration_seconds=20.0,
+            fps=30.0,
+            frame_count=600,
+            width=1280,
+            height=720,
+            managed_path="/managed/demo.mp4",
+            quality_rule_version="m2b-basic-v1",
+            quality_warnings_json="[]",
+        )
+    )
+    assert created.id is not None
+
+    updated = repository.update_video_metadata(
+        created.id,
+        camera_view=" 俯视 ",
+        body_side=" 双侧 ",
+        capture_protocol=" 指令任务 ",
+        video_notes=" 复核后修改 ",
+    )
+
+    assert updated.camera_view == "俯视"
+    assert updated.body_side == "双侧"
+    assert updated.capture_protocol == "指令任务"
+    assert updated.video_notes == "复核后修改"
+    assert updated.patient_id == created.patient_id
+    assert updated.file_sha256 == created.file_sha256
+    assert updated.source_path == created.source_path
+    assert updated.managed_path == created.managed_path
+    assert updated.imported_at == created.imported_at
+    assert updated.quality_rule_version == created.quality_rule_version
+    assert repository.audit_events()[-1]["action"] == "UPDATE_VIDEO_METADATA"
+
+    audit_count = len(repository.audit_events())
+    unchanged = repository.update_video_metadata(
+        created.id,
+        camera_view="俯视",
+        body_side="双侧",
+        capture_protocol="指令任务",
+        video_notes="复核后修改",
+    )
+    assert unchanged == updated
+    assert len(repository.audit_events()) == audit_count
+
+
+def test_missing_video_cannot_be_updated(tmp_path: Path) -> None:
+    repository = PatientRepository(tmp_path / "corporidoc.sqlite3")
+
+    with pytest.raises(KeyError, match="视频登记不存在"):
+        repository.update_video_metadata(
+            999,
+            camera_view="正面",
+            body_side="双侧",
+            capture_protocol="静息观察",
+            video_notes="",
+        )
+
+
 def test_existing_m1_database_is_migrated(tmp_path: Path) -> None:
     database = tmp_path / "corporidoc.sqlite3"
     with sqlite3.connect(database) as connection:
