@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QFileDialog,
     QHBoxLayout,
@@ -35,12 +36,16 @@ class VideoTab(QWidget):
         self.probe = VideoProbe()
         self.video_store = ManagedVideoStore(repository.database_path.parent)
         self.active_patient: Patient | None = None
+        self._videos: list[VideoAsset] = []
 
         self.patient_label = QLabel("请先在“患者”页切换当前患者")
         self.patient_label.setObjectName("activePatient")
         self.import_button = QPushButton("导入视频副本")
         self.import_button.setEnabled(False)
         self.import_button.clicked.connect(self.import_video)
+        self.delete_button = QPushButton("删除所选登记")
+        self.delete_button.setEnabled(False)
+        self.delete_button.clicked.connect(self.delete_selected_video)
         refresh_button = QPushButton("刷新")
         refresh_button.clicked.connect(self.refresh)
 
@@ -48,6 +53,7 @@ class VideoTab(QWidget):
         controls.addWidget(self.patient_label)
         controls.addStretch()
         controls.addWidget(self.import_button)
+        controls.addWidget(self.delete_button)
         controls.addWidget(refresh_button)
 
         self.table = QTableWidget(0, 9)
@@ -66,6 +72,8 @@ class VideoTab(QWidget):
         )
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.itemSelectionChanged.connect(self._update_delete_button)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
 
@@ -88,9 +96,12 @@ class VideoTab(QWidget):
 
     def refresh(self) -> None:
         if self.active_patient is None or self.active_patient.id is None:
+            self._videos = []
             self.table.setRowCount(0)
+            self._update_delete_button()
             return
         videos = self.repository.list_video_assets(self.active_patient.id)
+        self._videos = videos
         self.table.setRowCount(len(videos))
         for row, video in enumerate(videos):
             values = [
@@ -109,6 +120,58 @@ class VideoTab(QWidget):
                 if column in (7, 8) and value == "缺失":
                     item.setForeground(Qt.red)
                 self.table.setItem(row, column, item)
+        self._update_delete_button()
+
+    def _update_delete_button(self) -> None:
+        row = self.table.currentRow()
+        self.delete_button.setEnabled(0 <= row < len(self._videos))
+
+    def delete_selected_video(self) -> None:
+        row = self.table.currentRow()
+        if not 0 <= row < len(self._videos):
+            QMessageBox.information(self, "未选择视频", "请先选择一条视频登记记录。")
+            return
+        video = self._videos[row]
+        if video.id is None:
+            QMessageBox.warning(self, "无法删除", "视频登记缺少数据库 ID。")
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "确认删除视频登记",
+            f"确定删除“{video.filename}”的登记记录和应用副本吗？\n\n"
+            "用户原始视频不会被删除；删除操作会保留审计记录。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        try:
+            deleted = self.repository.delete_video_asset(video.id)
+        except (KeyError, ValueError) as error:
+            QMessageBox.warning(self, "无法删除", str(error))
+            return
+
+        cleanup_error: VideoStorageError | None = None
+        try:
+            self.video_store.remove_managed_copy(deleted.managed_path)
+        except VideoStorageError as error:
+            cleanup_error = error
+
+        self.refresh()
+        if cleanup_error is not None:
+            QMessageBox.warning(
+                self,
+                "登记已删除",
+                f"登记和去重限制已删除，但应用副本清理失败：{cleanup_error}",
+            )
+            return
+        QMessageBox.information(
+            self,
+            "删除完成",
+            "视频登记和应用副本已删除；用户原始视频未被修改。",
+        )
 
     def import_video(self) -> None:
         if self.active_patient is None or self.active_patient.id is None:
