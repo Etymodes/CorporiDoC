@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from corporidoc.data import DuplicatePatientCodeError, PatientRepository
 from corporidoc.domain import Patient
+from corporidoc.ui.pose_tab import PoseTab
 from corporidoc.ui.video_tab import VideoTab
 
 
@@ -258,13 +260,11 @@ class MainWindow(QMainWindow):
         self.start_tab = StartTab()
         self.patient_tab = PatientTab(repository)
         self.video_tab = VideoTab(repository)
+        self.pose_tab = PoseTab(repository)
         self.tabs.addTab(self.start_tab, "开始")
         self.tabs.addTab(self.patient_tab, "患者")
         self.tabs.addTab(self.video_tab, "视频")
-        self.tabs.addTab(
-            PlaceholderTab("姿态与人工复核", "选择模型、生成关键点、修正低置信度帧并保留版本。"),
-            "姿态",
-        )
+        self.tabs.addTab(self.pose_tab, "姿态")
         self.tabs.addTab(
             PlaceholderTab(
                 "刺激—反应与行为评估", "对齐指令和刺激事件，量化时锁反应；由临床人员确认评分证据。"
@@ -290,6 +290,8 @@ class MainWindow(QMainWindow):
             lambda: self.tabs.setCurrentWidget(self.patient_tab)
         )
         self.patient_tab.active_patient_changed.connect(self.set_active_patient)
+        self.pose_tab.task_idle.connect(self._finish_pending_close)
+        self._close_when_pose_idle = False
         self.setStyleSheet(
             """
             QMainWindow { background: #f5f7fa; }
@@ -308,4 +310,29 @@ class MainWindow(QMainWindow):
         self.active_patient = patient
         self.start_tab.set_active_patient(patient)
         self.video_tab.set_active_patient(patient)
+        self.pose_tab.set_active_patient(patient)
         self.statusBar().showMessage(f"当前患者：{patient.patient_code}")
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if not self.pose_tab.is_running:
+            event.accept()
+            return
+        answer = QMessageBox.question(
+            self,
+            "姿态任务仍在运行",
+            "是否取消当前 Mock 姿态任务，并在清理完成后关闭？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer == QMessageBox.No:
+            event.ignore()
+            return
+        self._close_when_pose_idle = True
+        self.pose_tab.cancel_task()
+        event.ignore()
+
+    def _finish_pending_close(self) -> None:
+        if not self._close_when_pose_idle:
+            return
+        self._close_when_pose_idle = False
+        self.close()
