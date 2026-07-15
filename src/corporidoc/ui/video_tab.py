@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -26,7 +27,13 @@ from corporidoc.data import (
     VideoProbeError,
     VideoStorageError,
 )
-from corporidoc.domain import Patient, VideoAsset
+from corporidoc.domain import (
+    Patient,
+    VideoAsset,
+    assess_video_quality,
+    decode_quality_warnings,
+)
+from corporidoc.ui.video_intake_dialog import VideoIntakeDialog
 
 
 class VideoTab(QWidget):
@@ -56,10 +63,13 @@ class VideoTab(QWidget):
         controls.addWidget(self.delete_button)
         controls.addWidget(refresh_button)
 
-        self.table = QTableWidget(0, 9)
+        self.table = QTableWidget(0, 12)
         self.table.setHorizontalHeaderLabels(
             [
                 "文件",
+                "机位/侧别",
+                "采集协议",
+                "基础质控",
                 "时长",
                 "分辨率",
                 "FPS",
@@ -104,8 +114,18 @@ class VideoTab(QWidget):
         self._videos = videos
         self.table.setRowCount(len(videos))
         for row, video in enumerate(videos):
+            warnings = decode_quality_warnings(video.quality_warnings_json)
+            if not video.quality_rule_version:
+                quality_summary = "未评估"
+            elif warnings:
+                quality_summary = f"需复核（{len(warnings)}）"
+            else:
+                quality_summary = "基础检查通过"
             values = [
                 video.filename,
+                f"{video.camera_view}/{video.body_side}",
+                video.capture_protocol or "未记录",
+                quality_summary,
                 self._duration(video.duration_seconds),
                 f"{video.width}×{video.height}",
                 f"{video.fps:.2f}" if video.fps else "未知",
@@ -117,7 +137,10 @@ class VideoTab(QWidget):
             ]
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
-                if column in (7, 8) and value == "缺失":
+                if column == 3 and warnings:
+                    item.setForeground(Qt.darkYellow)
+                    item.setToolTip("\n".join(warnings))
+                if column in (10, 11) and value == "缺失":
                     item.setForeground(Qt.red)
                 self.table.setItem(row, column, item)
         self._update_delete_button()
@@ -186,11 +209,26 @@ class VideoTab(QWidget):
         if not filename:
             return
 
+        metadata = None
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             metadata = self.probe.inspect(Path(filename))
             if self.repository.find_video_by_sha256(metadata.file_sha256):
                 raise DuplicateVideoError("该视频内容已经登记，未重复导入")
+        except (VideoProbeError, DuplicateVideoError, ValueError) as error:
+            QMessageBox.warning(self, "无法登记视频", str(error))
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        assessment = assess_video_quality(metadata)
+        intake_dialog = VideoIntakeDialog(metadata, assessment, self)
+        if intake_dialog.exec() != QDialog.Accepted:
+            return
+        details = intake_dialog.value()
+
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
             managed_path = self.video_store.archive(metadata, self.active_patient.id)
             self.repository.create_video_asset(
                 VideoAsset(
@@ -206,14 +244,15 @@ class VideoTab(QWidget):
                     width=metadata.width,
                     height=metadata.height,
                     managed_path=str(managed_path),
+                    camera_view=details.camera_view,
+                    body_side=details.body_side,
+                    capture_protocol=details.capture_protocol,
+                    video_notes=details.video_notes,
+                    quality_rule_version=assessment.rule_version,
+                    quality_warnings_json=assessment.to_json(),
                 )
             )
-        except (
-            VideoProbeError,
-            VideoStorageError,
-            DuplicateVideoError,
-            ValueError,
-        ) as error:
+        except (VideoStorageError, DuplicateVideoError, ValueError) as error:
             QMessageBox.warning(self, "无法登记视频", str(error))
             return
         finally:
@@ -223,7 +262,8 @@ class VideoTab(QWidget):
         QMessageBox.information(
             self,
             "导入完成",
-            "视频已复制到患者应用目录并通过 SHA-256 校验；原文件未被修改。",
+            "视频已复制到患者应用目录并通过 SHA-256 校验；"
+            f"基础质控结果：{assessment.summary}。",
         )
 
     @staticmethod

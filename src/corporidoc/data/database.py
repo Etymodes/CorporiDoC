@@ -81,6 +81,12 @@ class PatientRepository:
                     width INTEGER NOT NULL,
                     height INTEGER NOT NULL,
                     managed_path TEXT NOT NULL DEFAULT '',
+                    camera_view TEXT NOT NULL DEFAULT '未记录',
+                    body_side TEXT NOT NULL DEFAULT '未记录',
+                    capture_protocol TEXT NOT NULL DEFAULT '',
+                    video_notes TEXT NOT NULL DEFAULT '',
+                    quality_rule_version TEXT NOT NULL DEFAULT '',
+                    quality_warnings_json TEXT NOT NULL DEFAULT '[]',
                     imported_at TEXT NOT NULL
                 );
                 """
@@ -92,6 +98,19 @@ class PatientRepository:
                 connection.execute(
                     "ALTER TABLE video_assets ADD COLUMN managed_path TEXT NOT NULL DEFAULT ''"
                 )
+            migrations = {
+                "camera_view": "TEXT NOT NULL DEFAULT '未记录'",
+                "body_side": "TEXT NOT NULL DEFAULT '未记录'",
+                "capture_protocol": "TEXT NOT NULL DEFAULT ''",
+                "video_notes": "TEXT NOT NULL DEFAULT ''",
+                "quality_rule_version": "TEXT NOT NULL DEFAULT ''",
+                "quality_warnings_json": "TEXT NOT NULL DEFAULT '[]'",
+            }
+            for column, definition in migrations.items():
+                if column not in video_columns:
+                    connection.execute(
+                        f"ALTER TABLE video_assets ADD COLUMN {column} {definition}"
+                    )
 
     @staticmethod
     def _now() -> str:
@@ -276,8 +295,9 @@ class PatientRepository:
                     INSERT INTO video_assets (
                         patient_id, source_path, filename, file_sha256, file_size_bytes,
                         extension, duration_seconds, fps, frame_count, width, height,
-                        managed_path, imported_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        managed_path, camera_view, body_side, capture_protocol, video_notes,
+                        quality_rule_version, quality_warnings_json, imported_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         video.patient_id,
@@ -292,6 +312,12 @@ class PatientRepository:
                         video.width,
                         video.height,
                         video.managed_path,
+                        video.camera_view,
+                        video.body_side,
+                        video.capture_protocol,
+                        video.video_notes,
+                        video.quality_rule_version,
+                        video.quality_warnings_json,
                         self._now(),
                     ),
                 )
