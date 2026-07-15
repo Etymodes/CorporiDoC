@@ -30,7 +30,9 @@ class ManagedVideoStore:
 
         if destination.exists():
             if sha256_file(destination) != metadata.file_sha256:
-                raise VideoStorageError("应用目录中存在同名但内容不一致的文件，请停止导入并检查存储")
+                raise VideoStorageError(
+                    "应用目录中存在同名但内容不一致的文件，请停止导入并检查存储"
+                )
             return destination
 
         descriptor, temporary_name = tempfile.mkstemp(
