@@ -80,10 +80,18 @@ class PatientRepository:
                     frame_count INTEGER NOT NULL,
                     width INTEGER NOT NULL,
                     height INTEGER NOT NULL,
+                    managed_path TEXT NOT NULL DEFAULT '',
                     imported_at TEXT NOT NULL
                 );
                 """
             )
+            video_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(video_assets)")
+            }
+            if "managed_path" not in video_columns:
+                connection.execute(
+                    "ALTER TABLE video_assets ADD COLUMN managed_path TEXT NOT NULL DEFAULT ''"
+                )
 
     @staticmethod
     def _now() -> str:
@@ -233,6 +241,13 @@ class PatientRepository:
             ).fetchall()
         return [self._video_from_row(row) for row in rows]
 
+    def find_video_by_sha256(self, file_sha256: str) -> VideoAsset | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM video_assets WHERE file_sha256 = ?", (file_sha256,)
+            ).fetchone()
+        return self._video_from_row(row) if row else None
+
     def create_video_asset(self, video: VideoAsset) -> VideoAsset:
         if video.patient_id <= 0:
             raise ValueError("导入视频时缺少有效患者")
@@ -243,8 +258,8 @@ class PatientRepository:
                     INSERT INTO video_assets (
                         patient_id, source_path, filename, file_sha256, file_size_bytes,
                         extension, duration_seconds, fps, frame_count, width, height,
-                        imported_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        managed_path, imported_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         video.patient_id,
@@ -258,6 +273,7 @@ class PatientRepository:
                         video.frame_count,
                         video.width,
                         video.height,
+                        video.managed_path,
                         self._now(),
                     ),
                 )

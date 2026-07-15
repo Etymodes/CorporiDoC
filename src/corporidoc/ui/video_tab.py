@@ -19,9 +19,11 @@ from PySide6.QtWidgets import (
 
 from corporidoc.data import (
     DuplicateVideoError,
+    ManagedVideoStore,
     PatientRepository,
     VideoProbe,
     VideoProbeError,
+    VideoStorageError,
 )
 from corporidoc.domain import Patient, VideoAsset
 
@@ -31,11 +33,12 @@ class VideoTab(QWidget):
         super().__init__()
         self.repository = repository
         self.probe = VideoProbe()
+        self.video_store = ManagedVideoStore(repository.database_path.parent)
         self.active_patient: Patient | None = None
 
         self.patient_label = QLabel("请先在“患者”页切换当前患者")
         self.patient_label.setObjectName("activePatient")
-        self.import_button = QPushButton("登记源视频")
+        self.import_button = QPushButton("导入视频副本")
         self.import_button.setEnabled(False)
         self.import_button.clicked.connect(self.import_video)
         refresh_button = QPushButton("刷新")
@@ -47,9 +50,19 @@ class VideoTab(QWidget):
         controls.addWidget(self.import_button)
         controls.addWidget(refresh_button)
 
-        self.table = QTableWidget(0, 8)
+        self.table = QTableWidget(0, 9)
         self.table.setHorizontalHeaderLabels(
-            ["文件", "时长", "分辨率", "FPS", "帧数", "大小", "SHA-256", "源文件"]
+            [
+                "文件",
+                "时长",
+                "分辨率",
+                "FPS",
+                "帧数",
+                "大小",
+                "SHA-256",
+                "应用副本",
+                "原路径",
+            ]
         )
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -57,8 +70,8 @@ class VideoTab(QWidget):
         self.table.horizontalHeader().setStretchLastSection(True)
 
         notice = QLabel(
-            "当前步骤只登记源文件路径和元数据，不复制、不改写视频。"
-            "移动或删除原文件后，此记录会显示为“缺失”。"
+            "导入时会在对应患者的应用目录中建立经 SHA-256 校验的副本。"
+            "原文件不会被修改；原路径移动后仍使用应用副本。"
         )
         notice.setWordWrap(True)
 
@@ -88,11 +101,12 @@ class VideoTab(QWidget):
                 str(video.frame_count) if video.frame_count else "未知",
                 self._file_size(video.file_size_bytes),
                 video.file_sha256[:12],
+                "可用" if video.managed_path and Path(video.managed_path).is_file() else "缺失",
                 "可用" if Path(video.source_path).is_file() else "缺失",
             ]
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
-                if column == 7 and value == "缺失":
+                if column in (7, 8) and value == "缺失":
                     item.setForeground(Qt.red)
                 self.table.setItem(row, column, item)
 
@@ -112,6 +126,9 @@ class VideoTab(QWidget):
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             metadata = self.probe.inspect(Path(filename))
+            if self.repository.find_video_by_sha256(metadata.file_sha256):
+                raise DuplicateVideoError("该视频内容已经登记，未重复导入")
+            managed_path = self.video_store.archive(metadata, self.active_patient.id)
             self.repository.create_video_asset(
                 VideoAsset(
                     patient_id=self.active_patient.id,
@@ -125,16 +142,26 @@ class VideoTab(QWidget):
                     frame_count=metadata.frame_count,
                     width=metadata.width,
                     height=metadata.height,
+                    managed_path=str(managed_path),
                 )
             )
-        except (VideoProbeError, DuplicateVideoError, ValueError) as error:
+        except (
+            VideoProbeError,
+            VideoStorageError,
+            DuplicateVideoError,
+            ValueError,
+        ) as error:
             QMessageBox.warning(self, "无法登记视频", str(error))
             return
         finally:
             QApplication.restoreOverrideCursor()
 
         self.refresh()
-        QMessageBox.information(self, "登记完成", "源视频已登记，文件内容未被修改。")
+        QMessageBox.information(
+            self,
+            "导入完成",
+            "视频已复制到患者应用目录并通过 SHA-256 校验；原文件未被修改。",
+        )
 
     @staticmethod
     def _duration(seconds: float) -> str:
