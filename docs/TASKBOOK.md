@@ -1,6 +1,6 @@
 # CorporiDoC × TiantanDoC 开发任务书
 
-版本：0.1（Milestone 1）  
+版本：0.2（Milestone 2A）  
 运行环境：`soma`（Python 3.10）  
 仓库：`Etymodes/CorporiDoC`
 
@@ -176,7 +176,7 @@ ModelVersion -> InferenceRun
 - 项目定位、医疗边界、运行环境和核心参考；
 - 提交：`Initialize CorporiDoC`。
 
-### M1：患者管理与应用壳（本分支）
+### M1：患者管理与应用壳（已完成）
 
 交付：开始界面、标签页、患者注册/切换/修改、SQLite、审计事件、单元测试。  
 验收：使用虚构患者可完成增改查；重复编号被拒绝；重启后仍可读取；测试通过。  
@@ -187,6 +187,10 @@ ModelVersion -> InferenceRun
 交付：文件选择、SHA-256、OpenCV/ffprobe 元数据、缩略图、播放、会话绑定、质量警告。  
 验收：同一文件不重复入库；损坏视频有明确错误；不改写源文件；可登记机位和拍摄协议。  
 建议拆分：`Add immutable video intake`、`Add video quality summary`。
+
+M2A 当前交付：按患者登记源视频路径、SHA-256 内容去重、OpenCV 基础元数据、首帧可解码
+验证、源文件缺失提示和导入审计。M2A 不复制源视频，也不把 OpenCV 返回值当作精确采集时钟；
+可变帧率、编码和音视频流信息将在 M2B 使用 `ffprobe` 复核。
 
 ### M3：姿态后端协议与 Mock 推理
 
@@ -319,4 +323,3 @@ ModelVersion -> InferenceRun
 - DeepLabCut-Live! source: https://github.com/DeepLabCut/DeepLabCut-live
 - DeepLabStream source: https://github.com/SchwarzNeuroconLab/DeepLabStream
 - SLEAP source: https://github.com/talmolab/sleap
-
