@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -7,7 +9,13 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from corporidoc.domain import Patient, VideoAsset
+from corporidoc.domain import (
+    InferenceArtifactRecord,
+    InferenceRunRecord,
+    Patient,
+    VideoAsset,
+)
+from corporidoc.pose import InferenceRequest, InferenceResult, InferenceStatus
 
 
 class DuplicatePatientCodeError(ValueError):
@@ -88,6 +96,39 @@ class PatientRepository:
                     quality_rule_version TEXT NOT NULL DEFAULT '',
                     quality_warnings_json TEXT NOT NULL DEFAULT '[]',
                     imported_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS inference_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    request_id TEXT NOT NULL UNIQUE,
+                    patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE RESTRICT,
+                    video_asset_id INTEGER NOT NULL REFERENCES video_assets(id) ON DELETE RESTRICT,
+                    status TEXT NOT NULL,
+                    backend_name TEXT NOT NULL,
+                    backend_version TEXT NOT NULL,
+                    model_name TEXT NOT NULL,
+                    model_version TEXT NOT NULL,
+                    weights_sha256 TEXT NOT NULL DEFAULT '',
+                    keypoint_schema_version TEXT NOT NULL DEFAULT '',
+                    video_sha256 TEXT NOT NULL,
+                    requested_artifacts_json TEXT NOT NULL,
+                    parameters_json TEXT NOT NULL,
+                    requested_at TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT NOT NULL DEFAULT '',
+                    processed_frames INTEGER NOT NULL DEFAULT 0,
+                    warnings_json TEXT NOT NULL DEFAULT '[]',
+                    error_message TEXT NOT NULL DEFAULT ''
+                );
+
+                CREATE TABLE IF NOT EXISTS inference_artifacts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    inference_run_id INTEGER NOT NULL
+                        REFERENCES inference_runs(id) ON DELETE CASCADE,
+                    kind TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    UNIQUE(inference_run_id, kind, path)
                 );
                 """
             )
@@ -329,21 +370,24 @@ class PatientRepository:
         return updated
 
     def delete_video_asset(self, video_id: int) -> VideoAsset:
-        with self._connection() as connection:
-            row = connection.execute(
-                "SELECT * FROM video_assets WHERE id = ?", (video_id,)
-            ).fetchone()
-            if row is None:
-                raise KeyError(f"视频登记不存在: {video_id}")
-            video = self._video_from_row(row)
-            connection.execute("DELETE FROM video_assets WHERE id = ?", (video_id,))
-            self._audit(
-                connection,
-                action="DELETE_VIDEO",
-                entity_type="video",
-                entity_id=video_id,
-                summary=f"filename={video.filename};sha256={video.file_sha256[:12]}",
-            )
+        try:
+            with self._connection() as connection:
+                row = connection.execute(
+                    "SELECT * FROM video_assets WHERE id = ?", (video_id,)
+                ).fetchone()
+                if row is None:
+                    raise KeyError(f"视频登记不存在: {video_id}")
+                video = self._video_from_row(row)
+                connection.execute("DELETE FROM video_assets WHERE id = ?", (video_id,))
+                self._audit(
+                    connection,
+                    action="DELETE_VIDEO",
+                    entity_type="video",
+                    entity_id=video_id,
+                    summary=f"filename={video.filename};sha256={video.file_sha256[:12]}",
+                )
+        except sqlite3.IntegrityError as error:
+            raise ValueError("视频已有推理运行记录，为保留证据链不能删除") from error
         return video
 
     def create_video_asset(self, video: VideoAsset) -> VideoAsset:
@@ -404,3 +448,198 @@ class PatientRepository:
             ).fetchone()
         assert row is not None
         return self._video_from_row(row)
+
+    def create_inference_run(self, request: InferenceRequest) -> InferenceRunRecord:
+        errors = request.validation_errors()
+        if errors:
+            raise ValueError("；".join(errors))
+        try:
+            parameters_json = json.dumps(
+                request.parameters,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        except TypeError as error:
+            raise ValueError("推理参数必须可以保存为 JSON") from error
+        requested_artifacts_json = json.dumps(
+            [artifact.value for artifact in request.requested_artifacts],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+        with self._connection() as connection:
+            video = connection.execute(
+                "SELECT patient_id, file_sha256 FROM video_assets WHERE id = ?",
+                (request.video_asset_id,),
+            ).fetchone()
+            if video is None:
+                raise ValueError("姿态任务引用的视频登记不存在")
+            if video["patient_id"] != request.patient_id:
+                raise ValueError("姿态任务患者与视频登记不一致")
+            if video["file_sha256"].lower() != request.video_sha256.lower():
+                raise ValueError("姿态任务视频哈希与登记记录不一致")
+
+            cursor = connection.execute(
+                """
+                INSERT INTO inference_runs (
+                    request_id, patient_id, video_asset_id, status,
+                    backend_name, backend_version, model_name, model_version,
+                    weights_sha256, keypoint_schema_version, video_sha256,
+                    requested_artifacts_json, parameters_json, requested_at, started_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    request.request_id,
+                    request.patient_id,
+                    request.video_asset_id,
+                    InferenceStatus.RUNNING.value,
+                    request.backend.name,
+                    request.backend.version,
+                    request.backend.model_name,
+                    request.backend.model_version,
+                    request.backend.weights_sha256,
+                    request.backend.keypoint_schema_version,
+                    request.video_sha256.lower(),
+                    requested_artifacts_json,
+                    parameters_json,
+                    request.requested_at.isoformat(),
+                    self._now(),
+                ),
+            )
+            run_id = int(cursor.lastrowid)
+            self._audit(
+                connection,
+                action="START_INFERENCE",
+                entity_type="inference_run",
+                entity_id=run_id,
+                summary=f"backend={request.backend.name};video_id={request.video_asset_id}",
+            )
+        run = self.get_inference_run(request.request_id)
+        assert run is not None
+        return run
+
+    def finish_inference_run(self, result: InferenceResult) -> InferenceRunRecord:
+        if result.status not in {
+            InferenceStatus.SUCCEEDED,
+            InferenceStatus.FAILED,
+            InferenceStatus.CANCELLED,
+        }:
+            raise ValueError("只能保存推理终态")
+        if result.status is not InferenceStatus.SUCCEEDED and result.artifacts:
+            raise ValueError("失败或取消的任务不能登记完成产物")
+
+        artifact_rows: list[tuple[str, str, str]] = []
+        for artifact in result.artifacts:
+            path = artifact.path.expanduser().resolve()
+            try:
+                path.relative_to(self.database_path.parent.resolve())
+            except ValueError as error:
+                raise ValueError("推理产物必须位于应用数据目录内") from error
+            if not path.is_file():
+                raise ValueError("推理产物不存在或不是文件")
+            if self._sha256_file(path) != artifact.sha256.lower():
+                raise ValueError("推理产物 SHA-256 校验失败")
+            artifact_rows.append((artifact.kind.value, str(path), artifact.sha256.lower()))
+
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT id, status FROM inference_runs WHERE request_id = ?",
+                (result.request_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("推理运行记录不存在")
+            if row["status"] != InferenceStatus.RUNNING.value:
+                raise ValueError("推理运行记录已经处于终态")
+            run_id = int(row["id"])
+            connection.execute(
+                """
+                UPDATE inference_runs SET
+                    status = ?, started_at = ?, finished_at = ?, processed_frames = ?,
+                    warnings_json = ?, error_message = ?
+                WHERE id = ?
+                """,
+                (
+                    result.status.value,
+                    result.started_at.isoformat(),
+                    result.finished_at.isoformat(),
+                    result.processed_frames,
+                    json.dumps(result.warnings, ensure_ascii=False, separators=(",", ":")),
+                    result.error_message,
+                    run_id,
+                ),
+            )
+            connection.executemany(
+                """
+                INSERT INTO inference_artifacts (inference_run_id, kind, path, sha256)
+                VALUES (?, ?, ?, ?)
+                """,
+                [(run_id, kind, path, sha256) for kind, path, sha256 in artifact_rows],
+            )
+            self._audit(
+                connection,
+                action="FINISH_INFERENCE",
+                entity_type="inference_run",
+                entity_id=run_id,
+                summary=f"status={result.status.value};artifacts={len(artifact_rows)}",
+            )
+        run = self.get_inference_run(result.request_id)
+        assert run is not None
+        return run
+
+    def get_inference_run(self, request_id: str) -> InferenceRunRecord | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM inference_runs WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            artifacts = connection.execute(
+                """
+                SELECT kind, path, sha256 FROM inference_artifacts
+                WHERE inference_run_id = ? ORDER BY id
+                """,
+                (row["id"],),
+            ).fetchall()
+        return self._inference_run_from_rows(row, artifacts)
+
+    def list_inference_runs(self, patient_id: int) -> list[InferenceRunRecord]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM inference_runs
+                WHERE patient_id = ? ORDER BY id DESC
+                """,
+                (patient_id,),
+            ).fetchall()
+            runs: list[InferenceRunRecord] = []
+            for row in rows:
+                artifacts = connection.execute(
+                    """
+                    SELECT kind, path, sha256 FROM inference_artifacts
+                    WHERE inference_run_id = ? ORDER BY id
+                    """,
+                    (row["id"],),
+                ).fetchall()
+                runs.append(self._inference_run_from_rows(row, artifacts))
+        return runs
+
+    @staticmethod
+    def _inference_run_from_rows(
+        row: sqlite3.Row,
+        artifacts: list[sqlite3.Row],
+    ) -> InferenceRunRecord:
+        values = dict(row)
+        values["artifacts"] = tuple(
+            InferenceArtifactRecord(**dict(artifact)) for artifact in artifacts
+        )
+        return InferenceRunRecord(**values)
+
+    @staticmethod
+    def _sha256_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
