@@ -267,6 +267,67 @@ class PatientRepository:
             ).fetchone()
         return self._video_from_row(row) if row else None
 
+    def get_video_asset(self, video_id: int) -> VideoAsset | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM video_assets WHERE id = ?", (video_id,)
+            ).fetchone()
+        return self._video_from_row(row) if row else None
+
+    def update_video_metadata(
+        self,
+        video_id: int,
+        *,
+        camera_view: str,
+        body_side: str,
+        capture_protocol: str,
+        video_notes: str,
+    ) -> VideoAsset:
+        current = self.get_video_asset(video_id)
+        if current is None:
+            raise KeyError(f"视频登记不存在: {video_id}")
+
+        values = {
+            "camera_view": camera_view.strip() or "未记录",
+            "body_side": body_side.strip() or "未记录",
+            "capture_protocol": capture_protocol.strip(),
+            "video_notes": video_notes.strip(),
+        }
+        changed_fields = [
+            field for field, value in values.items() if getattr(current, field) != value
+        ]
+        if not changed_fields:
+            return current
+
+        with self._connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE video_assets SET
+                    camera_view = ?, body_side = ?, capture_protocol = ?, video_notes = ?
+                WHERE id = ?
+                """,
+                (
+                    values["camera_view"],
+                    values["body_side"],
+                    values["capture_protocol"],
+                    values["video_notes"],
+                    video_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"视频登记不存在: {video_id}")
+            self._audit(
+                connection,
+                action="UPDATE_VIDEO_METADATA",
+                entity_type="video",
+                entity_id=video_id,
+                summary=f"filename={current.filename};fields={','.join(changed_fields)}",
+            )
+
+        updated = self.get_video_asset(video_id)
+        assert updated is not None
+        return updated
+
     def delete_video_asset(self, video_id: int) -> VideoAsset:
         with self._connection() as connection:
             row = connection.execute(
