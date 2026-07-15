@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+build/
+dist/
+.idea/
+.vscode/
+
+# Patient data and generated clinical artifacts must never enter Git.
+*.sqlite
+*.sqlite3
+/data/
+/workspace/
+/artifacts/
+/exports/
+/videos/
+/models/
