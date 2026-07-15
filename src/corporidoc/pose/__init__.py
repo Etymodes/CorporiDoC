@@ -11,6 +11,7 @@ from corporidoc.pose.contracts import (
     ProgressCallback,
     ProgressUpdate,
 )
+from corporidoc.pose.mock_backend import MockPoseBackend
 
 __all__ = [
     "ArtifactKind",
@@ -21,6 +22,7 @@ __all__ = [
     "InferenceRequest",
     "InferenceResult",
     "InferenceStatus",
+    "MockPoseBackend",
     "PoseBackend",
     "ProgressCallback",
     "ProgressUpdate",
