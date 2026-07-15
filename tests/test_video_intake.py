@@ -128,6 +128,12 @@ def test_repository_rejects_duplicate_video_content(tmp_path: Path) -> None:
         width=1920,
         height=1080,
         managed_path=str(tmp_path / "patients/patient-000001/videos/demo.mp4"),
+        camera_view="床尾",
+        body_side="双侧",
+        capture_protocol="静息观察",
+        video_notes="测试视频",
+        quality_rule_version="m2b-basic-v1",
+        quality_warnings_json="[]",
     )
 
     created = repository.create_video_asset(video)
@@ -138,6 +144,11 @@ def test_repository_rejects_duplicate_video_content(tmp_path: Path) -> None:
     assert stored.managed_path == str(
         tmp_path / "patients/patient-000001/videos/demo.mp4"
     )
+    assert stored.camera_view == "床尾"
+    assert stored.body_side == "双侧"
+    assert stored.capture_protocol == "静息观察"
+    assert stored.video_notes == "测试视频"
+    assert stored.quality_rule_version == "m2b-basic-v1"
 
     with pytest.raises(DuplicateVideoError):
         repository.create_video_asset(video)
@@ -187,4 +198,12 @@ def test_existing_m1_database_is_migrated(tmp_path: Path) -> None:
     assert repository.list_video_assets(patient_id=1) == []
     with sqlite3.connect(database) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(video_assets)")}
-    assert "managed_path" in columns
+    assert {
+        "managed_path",
+        "camera_view",
+        "body_side",
+        "capture_protocol",
+        "video_notes",
+        "quality_rule_version",
+        "quality_warnings_json",
+    }.issubset(columns)
