@@ -7,10 +7,14 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from corporidoc.domain import Patient
+from corporidoc.domain import Patient, VideoAsset
 
 
 class DuplicatePatientCodeError(ValueError):
+    pass
+
+
+class DuplicateVideoError(ValueError):
     pass
 
 
@@ -61,6 +65,22 @@ class PatientRepository:
                     entity_type TEXT NOT NULL,
                     entity_id INTEGER,
                     summary TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS video_assets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    patient_id INTEGER NOT NULL REFERENCES patients(id) ON DELETE RESTRICT,
+                    source_path TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    file_sha256 TEXT NOT NULL UNIQUE,
+                    file_size_bytes INTEGER NOT NULL,
+                    extension TEXT NOT NULL,
+                    duration_seconds REAL NOT NULL,
+                    fps REAL NOT NULL,
+                    frame_count INTEGER NOT NULL,
+                    width INTEGER NOT NULL,
+                    height INTEGER NOT NULL,
+                    imported_at TEXT NOT NULL
                 );
                 """
             )
@@ -115,7 +135,13 @@ class PatientRepository:
                     ),
                 )
                 patient_id = int(cursor.lastrowid)
-                self._audit(connection, "CREATE", patient_id, patient.patient_code)
+                self._audit(
+                    connection,
+                    action="CREATE",
+                    entity_type="patient",
+                    entity_id=patient_id,
+                    summary=f"patient_code={patient.patient_code}",
+                )
         except sqlite3.IntegrityError as error:
             raise DuplicatePatientCodeError("患者研究编号已存在") from error
         created = self.get_patient(patient_id)
@@ -153,7 +179,13 @@ class PatientRepository:
                 )
                 if cursor.rowcount != 1:
                     raise KeyError(f"患者不存在: {patient.id}")
-                self._audit(connection, "UPDATE", patient.id, patient.patient_code)
+                self._audit(
+                    connection,
+                    action="UPDATE",
+                    entity_type="patient",
+                    entity_id=patient.id,
+                    summary=f"patient_code={patient.patient_code}",
+                )
         except sqlite3.IntegrityError as error:
             raise DuplicatePatientCodeError("患者研究编号已存在") from error
         updated = self.get_patient(patient.id)
@@ -162,27 +194,92 @@ class PatientRepository:
 
     def audit_events(self) -> list[dict[str, object]]:
         with self._connection() as connection:
-            rows = connection.execute(
-                "SELECT * FROM audit_events ORDER BY id ASC"
-            ).fetchall()
+            rows = connection.execute("SELECT * FROM audit_events ORDER BY id ASC").fetchall()
         return [dict(row) for row in rows]
 
     def _audit(
         self,
         connection: sqlite3.Connection,
         action: str,
-        patient_id: int,
-        patient_code: str,
+        entity_type: str,
+        entity_id: int,
+        summary: str,
     ) -> None:
         connection.execute(
             """
             INSERT INTO audit_events (occurred_at, action, entity_type, entity_id, summary)
-            VALUES (?, ?, 'patient', ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (self._now(), action, patient_id, f"patient_code={patient_code}"),
+            (self._now(), action, entity_type, entity_id, summary),
         )
 
     def export_patient_dict(self, patient_id: int) -> dict[str, object] | None:
         patient = self.get_patient(patient_id)
         return asdict(patient) if patient else None
 
+    @staticmethod
+    def _video_from_row(row: sqlite3.Row) -> VideoAsset:
+        return VideoAsset(**dict(row))
+
+    def list_video_assets(self, patient_id: int) -> list[VideoAsset]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM video_assets
+                WHERE patient_id = ?
+                ORDER BY imported_at DESC, id DESC
+                """,
+                (patient_id,),
+            ).fetchall()
+        return [self._video_from_row(row) for row in rows]
+
+    def create_video_asset(self, video: VideoAsset) -> VideoAsset:
+        if video.patient_id <= 0:
+            raise ValueError("导入视频时缺少有效患者")
+        try:
+            with self._connection() as connection:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO video_assets (
+                        patient_id, source_path, filename, file_sha256, file_size_bytes,
+                        extension, duration_seconds, fps, frame_count, width, height,
+                        imported_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        video.patient_id,
+                        video.source_path,
+                        video.filename,
+                        video.file_sha256,
+                        video.file_size_bytes,
+                        video.extension,
+                        video.duration_seconds,
+                        video.fps,
+                        video.frame_count,
+                        video.width,
+                        video.height,
+                        self._now(),
+                    ),
+                )
+                video_id = int(cursor.lastrowid)
+                self._audit(
+                    connection,
+                    action="IMPORT_VIDEO",
+                    entity_type="video",
+                    entity_id=video_id,
+                    summary=f"filename={video.filename};sha256={video.file_sha256[:12]}",
+                )
+        except sqlite3.IntegrityError as error:
+            message = str(error).lower()
+            if "file_sha256" in message or "unique" in message:
+                raise DuplicateVideoError("该视频内容已经登记，未重复导入") from error
+            if "foreign key" in message:
+                raise ValueError("所选患者不存在，无法登记视频") from error
+            raise
+
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM video_assets WHERE id = ?", (video_id,)
+            ).fetchone()
+        assert row is not None
+        return self._video_from_row(row)

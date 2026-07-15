@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from corporidoc.data import DuplicatePatientCodeError, PatientRepository
 from corporidoc.domain import Patient
+from corporidoc.ui.video_tab import VideoTab
 
 
 class PatientDialog(QDialog):
@@ -256,14 +257,10 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.start_tab = StartTab()
         self.patient_tab = PatientTab(repository)
+        self.video_tab = VideoTab(repository)
         self.tabs.addTab(self.start_tab, "开始")
         self.tabs.addTab(self.patient_tab, "患者")
-        self.tabs.addTab(
-            PlaceholderTab(
-                "视频导入与质控", "导入视频、建立会话、检查帧率/分辨率/遮挡与文件哈希。"
-            ),
-            "视频",
-        )
+        self.tabs.addTab(self.video_tab, "视频")
         self.tabs.addTab(
             PlaceholderTab("姿态与人工复核", "选择模型、生成关键点、修正低置信度帧并保留版本。"),
             "姿态",
@@ -310,4 +307,5 @@ class MainWindow(QMainWindow):
     def set_active_patient(self, patient: Patient) -> None:
         self.active_patient = patient
         self.start_tab.set_active_patient(patient)
+        self.video_tab.set_active_patient(patient)
         self.statusBar().showMessage(f"当前患者：{patient.patient_code}")
