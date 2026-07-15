@@ -23,9 +23,11 @@ from corporidoc.data import (
     DuplicateVideoError,
     ManagedVideoStore,
     PatientRepository,
+    VideoPlaybackError,
     VideoProbe,
     VideoProbeError,
     VideoStorageError,
+    resolve_video_playback_source,
 )
 from corporidoc.domain import (
     Patient,
@@ -35,6 +37,7 @@ from corporidoc.domain import (
 )
 from corporidoc.ui.video_details_dialog import VideoDetailsDialog
 from corporidoc.ui.video_intake_dialog import VideoIntakeDialog
+from corporidoc.ui.video_player_dialog import VideoPlayerDialog
 
 
 class VideoTab(QWidget):
@@ -57,6 +60,9 @@ class VideoTab(QWidget):
         self.details_button = QPushButton("查看/修改信息")
         self.details_button.setEnabled(False)
         self.details_button.clicked.connect(self.edit_selected_video)
+        self.play_button = QPushButton("播放所选视频")
+        self.play_button.setEnabled(False)
+        self.play_button.clicked.connect(self.play_selected_video)
         refresh_button = QPushButton("刷新")
         refresh_button.clicked.connect(self.refresh)
 
@@ -64,6 +70,7 @@ class VideoTab(QWidget):
         controls.addWidget(self.patient_label)
         controls.addStretch()
         controls.addWidget(self.import_button)
+        controls.addWidget(self.play_button)
         controls.addWidget(self.details_button)
         controls.addWidget(self.delete_button)
         controls.addWidget(refresh_button)
@@ -156,6 +163,21 @@ class VideoTab(QWidget):
         enabled = 0 <= row < len(self._videos)
         self.delete_button.setEnabled(enabled)
         self.details_button.setEnabled(enabled)
+        self.play_button.setEnabled(enabled)
+
+    def play_selected_video(self) -> None:
+        row = self.table.currentRow()
+        if not 0 <= row < len(self._videos):
+            QMessageBox.information(self, "未选择视频", "请先选择一条视频登记记录。")
+            return
+        video = self._videos[row]
+        try:
+            source = resolve_video_playback_source(video)
+        except VideoPlaybackError as error:
+            QMessageBox.warning(self, "无法播放", str(error))
+            return
+
+        VideoPlayerDialog(source.path, source.label, video.filename, self).exec()
 
     def edit_selected_video(self, *_: object) -> None:
         row = self.table.currentRow()
