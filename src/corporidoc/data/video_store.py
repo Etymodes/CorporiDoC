@@ -55,6 +55,28 @@ class ManagedVideoStore:
             raise VideoStorageError(f"无法复制视频到应用目录：{error}") from error
         return destination
 
+    def remove_managed_copy(self, managed_path: str) -> bool:
+        if not managed_path:
+            return False
+
+        candidate = Path(managed_path).expanduser()
+        if candidate.is_symlink():
+            raise VideoStorageError("拒绝删除符号链接形式的应用副本")
+        path = candidate.resolve()
+        patients_root = (self.data_root / "patients").resolve()
+        if not path.is_relative_to(patients_root):
+            raise VideoStorageError("拒绝删除 CorporiDoC 患者目录之外的文件")
+        if not path.exists():
+            return False
+        if not path.is_file():
+            raise VideoStorageError("应用副本路径不是普通文件，未执行删除")
+
+        try:
+            path.unlink()
+        except OSError as error:
+            raise VideoStorageError(f"无法删除应用副本：{error}") from error
+        return True
+
     @staticmethod
     def _safe_extension(extension: str) -> str:
         suffix = extension.lower()

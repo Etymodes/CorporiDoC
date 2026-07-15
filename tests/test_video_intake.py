@@ -66,6 +66,29 @@ def test_video_is_copied_into_patient_managed_storage(tmp_path: Path) -> None:
     assert sha256_file(managed) == metadata.file_sha256
 
 
+def test_managed_copy_can_be_removed_without_touching_source(tmp_path: Path) -> None:
+    source = tmp_path / "incoming" / "demo.mp4"
+    source.parent.mkdir()
+    source.write_bytes(b"CorporiDoC managed video")
+    metadata = VideoProbe(capture_factory=FakeCapture).inspect(source)
+    store = ManagedVideoStore(tmp_path / "app-data")
+    managed = store.archive(metadata, patient_id=7)
+
+    assert store.remove_managed_copy(str(managed)) is True
+    assert not managed.exists()
+    assert source.is_file()
+
+
+def test_managed_store_refuses_to_delete_external_file(tmp_path: Path) -> None:
+    external = tmp_path / "external.mp4"
+    external.write_bytes(b"do not delete")
+
+    with pytest.raises(VideoStorageError, match="患者目录之外"):
+        ManagedVideoStore(tmp_path / "app-data").remove_managed_copy(str(external))
+
+    assert external.is_file()
+
+
 def test_failed_copy_removes_partial_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -120,6 +143,14 @@ def test_repository_rejects_duplicate_video_content(tmp_path: Path) -> None:
         repository.create_video_asset(video)
 
     assert repository.audit_events()[-1]["action"] == "IMPORT_VIDEO"
+
+    deleted = repository.delete_video_asset(created.id)
+    assert deleted.file_sha256 == video.file_sha256
+    assert repository.list_video_assets(patient.id) == []
+    assert repository.audit_events()[-1]["action"] == "DELETE_VIDEO"
+
+    recreated = repository.create_video_asset(video)
+    assert recreated.id is not None
 
 
 def test_existing_m1_database_is_migrated(tmp_path: Path) -> None:

@@ -248,6 +248,24 @@ class PatientRepository:
             ).fetchone()
         return self._video_from_row(row) if row else None
 
+    def delete_video_asset(self, video_id: int) -> VideoAsset:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM video_assets WHERE id = ?", (video_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"视频登记不存在: {video_id}")
+            video = self._video_from_row(row)
+            connection.execute("DELETE FROM video_assets WHERE id = ?", (video_id,))
+            self._audit(
+                connection,
+                action="DELETE_VIDEO",
+                entity_type="video",
+                entity_id=video_id,
+                summary=f"filename={video.filename};sha256={video.file_sha256[:12]}",
+            )
+        return video
+
     def create_video_asset(self, video: VideoAsset) -> VideoAsset:
         if video.patient_id <= 0:
             raise ValueError("导入视频时缺少有效患者")
