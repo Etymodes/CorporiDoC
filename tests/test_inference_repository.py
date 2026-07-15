@@ -144,3 +144,19 @@ def test_failed_run_cannot_register_artifact(tmp_path: Path) -> None:
                 error_message="decoder failed",
             )
         )
+
+
+def test_reopen_marks_interrupted_run_failed(tmp_path: Path) -> None:
+    database_path = tmp_path / "corporidoc.sqlite3"
+    repository = PatientRepository(database_path)
+    video = registered_video(repository, tmp_path)
+    request = inference_request(repository, video)
+    repository.create_inference_run(request)
+
+    reopened = PatientRepository(database_path)
+    recovered = reopened.get_inference_run(request.request_id)
+
+    assert recovered is not None
+    assert recovered.status == "failed"
+    assert recovered.error_message == "应用上次退出前任务未完成"
+    assert reopened.audit_events()[-1]["action"] == "RECOVER_INFERENCE"

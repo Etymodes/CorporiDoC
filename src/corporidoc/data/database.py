@@ -33,6 +33,7 @@ class PatientRepository:
         self.database_path = Path(database_path)
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self._migrate()
+        self.recover_interrupted_inference_runs()
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -624,6 +625,38 @@ class PatientRepository:
                 ).fetchall()
                 runs.append(self._inference_run_from_rows(row, artifacts))
         return runs
+
+    def recover_interrupted_inference_runs(self) -> int:
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT id FROM inference_runs WHERE status = ? ORDER BY id",
+                (InferenceStatus.RUNNING.value,),
+            ).fetchall()
+            if not rows:
+                return 0
+            finished_at = self._now()
+            connection.execute(
+                """
+                UPDATE inference_runs SET
+                    status = ?, finished_at = ?,
+                    error_message = '应用上次退出前任务未完成'
+                WHERE status = ?
+                """,
+                (
+                    InferenceStatus.FAILED.value,
+                    finished_at,
+                    InferenceStatus.RUNNING.value,
+                ),
+            )
+            for row in rows:
+                self._audit(
+                    connection,
+                    action="RECOVER_INFERENCE",
+                    entity_type="inference_run",
+                    entity_id=int(row["id"]),
+                    summary="status=failed;reason=interrupted",
+                )
+        return len(rows)
 
     @staticmethod
     def _inference_run_from_rows(

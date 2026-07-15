@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -91,6 +95,15 @@ class PoseTab(QWidget):
         self.result_text.setReadOnly(True)
         self.result_text.setPlaceholderText("任务结果与产物路径将在这里显示")
 
+        self.history_table = QTableWidget(0, 6)
+        self.history_table.setHorizontalHeaderLabels(
+            ["终态", "视频 ID", "后端/模型", "帧数", "开始时间", "产物数"]
+        )
+        self.history_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.history_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.history_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.history_table.horizontalHeader().setStretchLastSection(True)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(32, 30, 32, 30)
         layout.addWidget(self.patient_label)
@@ -99,6 +112,8 @@ class PoseTab(QWidget):
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.status_label)
         layout.addWidget(self.result_text, 1)
+        layout.addWidget(QLabel("当前患者的近期任务"))
+        layout.addWidget(self.history_table, 1)
         self._set_controls_enabled(False)
 
     @property
@@ -121,6 +136,7 @@ class PoseTab(QWidget):
         self.video_combo.clear()
         if self.active_patient is None or self.active_patient.id is None:
             self._videos = []
+            self.history_table.setRowCount(0)
             self._set_controls_enabled(False)
             return
 
@@ -135,6 +151,7 @@ class PoseTab(QWidget):
             )
         self._set_controls_enabled(bool(self._videos))
         self.status_label.setText("请选择视频并运行 Mock 姿态 Demo" if self._videos else "当前患者无视频")
+        self._refresh_history()
 
     def start_mock_inference(self) -> None:
         if self.is_running:
@@ -154,6 +171,13 @@ class PoseTab(QWidget):
         except (VideoPlaybackError, ValueError) as error:
             QMessageBox.warning(self, "无法创建姿态任务", str(error))
             return
+
+        try:
+            self.repository.create_inference_run(request)
+        except Exception as error:
+            QMessageBox.warning(self, "无法登记姿态任务", str(error))
+            return
+        self._refresh_history()
 
         thread = QThread(self)
         cancellation = CancellationToken()
@@ -198,6 +222,10 @@ class PoseTab(QWidget):
 
     def _handle_result(self, result: InferenceResult) -> None:
         self.cancel_button.setEnabled(False)
+        try:
+            self.repository.finish_inference_run(result)
+        except Exception as persistence_error:
+            result = self._record_persistence_failure(result, persistence_error)
         if result.status is InferenceStatus.SUCCEEDED:
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(100)
@@ -225,6 +253,35 @@ class PoseTab(QWidget):
             )
             QMessageBox.warning(self, "Mock 姿态任务失败", result.error_message)
 
+    def _record_persistence_failure(
+        self,
+        result: InferenceResult,
+        persistence_error: Exception,
+    ) -> InferenceResult:
+        message = f"任务结果未能安全写入数据库：{persistence_error}"
+        failed = InferenceResult(
+            result.request_id,
+            InferenceStatus.FAILED,
+            result.started_at,
+            result.finished_at,
+            processed_frames=result.processed_frames,
+            warnings=result.warnings,
+            error_message=message,
+        )
+        try:
+            self.repository.finish_inference_run(failed)
+        except Exception as recovery_error:
+            return InferenceResult(
+                result.request_id,
+                InferenceStatus.FAILED,
+                result.started_at,
+                result.finished_at,
+                processed_frames=result.processed_frames,
+                warnings=result.warnings,
+                error_message=f"{message}；失败终态也未能落库：{recovery_error}",
+            )
+        return failed
+
     def _thread_finished(self) -> None:
         self._worker = None
         self._thread = None
@@ -233,6 +290,30 @@ class PoseTab(QWidget):
             self.patient_label.setText(f"当前患者：{self.active_patient.patient_code}")
         self.refresh()
         self.task_idle.emit()
+
+    def _refresh_history(self) -> None:
+        if self.active_patient is None or self.active_patient.id is None:
+            self.history_table.setRowCount(0)
+            return
+        runs = self.repository.list_inference_runs(self.active_patient.id)
+        self.history_table.setRowCount(len(runs))
+        status_labels = {
+            "running": "运行中",
+            "succeeded": "成功",
+            "failed": "失败",
+            "cancelled": "已取消",
+        }
+        for row, run in enumerate(runs):
+            values = (
+                status_labels.get(run.status, run.status),
+                str(run.video_asset_id),
+                f"{run.backend_name}/{run.model_name}",
+                str(run.processed_frames),
+                run.started_at,
+                str(len(run.artifacts)),
+            )
+            for column, value in enumerate(values):
+                self.history_table.setItem(row, column, QTableWidgetItem(value))
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         self.video_combo.setEnabled(enabled)
