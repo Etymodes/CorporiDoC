@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QHeaderView,
     QHBoxLayout,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
 from corporidoc.data import PatientRepository, VideoPlaybackError
 from corporidoc.domain import ModelAsset, Patient, VideoAsset
 from corporidoc.pose import (
+    ArtifactKind,
     CancellationToken,
     InferenceRequest,
     InferenceResult,
@@ -96,6 +98,7 @@ class PoseTab(QWidget):
         self.notice = QLabel()
         self.notice.setWordWrap(True)
         self.notice.setStyleSheet("color: #9a5b00;")
+        self.labeled_video_checkbox = QCheckBox("同时生成骨架叠加视频")
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
@@ -119,6 +122,7 @@ class PoseTab(QWidget):
         layout.addWidget(self.patient_label)
         layout.addLayout(controls)
         layout.addWidget(self.notice)
+        layout.addWidget(self.labeled_video_checkbox)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.status_label)
         layout.addWidget(self.result_text, 1)
@@ -176,10 +180,14 @@ class PoseTab(QWidget):
 
         try:
             backend = self._selected_backend()
+            requested_artifacts = (ArtifactKind.KEYPOINTS,)
+            if self.labeled_video_checkbox.isChecked():
+                requested_artifacts += (ArtifactKind.LABELED_VIDEO,)
             request = build_inference_request(
                 self._videos[row],
                 self.repository.database_path.parent,
                 backend.info,
+                requested_artifacts=requested_artifacts,
                 parameters=getattr(backend, "parameters", None),
             )
         except (VideoPlaybackError, ValueError) as error:
@@ -210,6 +218,7 @@ class PoseTab(QWidget):
 
         self.video_combo.setEnabled(False)
         self.backend_combo.setEnabled(False)
+        self.labeled_video_checkbox.setEnabled(False)
         self.refresh_button.setEnabled(False)
         self.start_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
@@ -365,10 +374,14 @@ class PoseTab(QWidget):
 
     def _update_notice(self) -> None:
         if self.backend_combo.currentData() is None:
+            self.labeled_video_checkbox.setChecked(False)
+            self.labeled_video_checkbox.setEnabled(False)
             self.notice.setText(
                 "Mock 输出是软件测试用虚拟轨迹，不代表患者真实姿态，不得进入临床判断。"
             )
             return
+        self.labeled_video_checkbox.setChecked(True)
+        self.labeled_video_checkbox.setEnabled(self.video_combo.isEnabled())
         self.notice.setText(
             "MediaPipe 是通用单人人体姿态工程基线，并非 DoC 临床模型。"
             "未检出、低可见度和遮挡结果必须结合源视频人工复核。"
@@ -377,6 +390,9 @@ class PoseTab(QWidget):
     def _set_controls_enabled(self, enabled: bool) -> None:
         self.video_combo.setEnabled(enabled)
         self.backend_combo.setEnabled(enabled)
+        self.labeled_video_checkbox.setEnabled(
+            enabled and self.backend_combo.currentData() is not None
+        )
         self.refresh_button.setEnabled(self.active_patient is not None)
         self.start_button.setEnabled(enabled)
         self.cancel_button.setEnabled(False)
