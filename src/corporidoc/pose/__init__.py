@@ -11,6 +11,7 @@ from corporidoc.pose.contracts import (
     ProgressCallback,
     ProgressUpdate,
 )
+from corporidoc.pose.mediapipe_backend import MEDIAPIPE_POSE_33, MediaPipePoseBackend
 from corporidoc.pose.mock_backend import MockPoseBackend
 from corporidoc.pose.model_preflight import (
     ModelPreflightResult,
@@ -27,6 +28,8 @@ __all__ = [
     "InferenceResult",
     "InferenceStatus",
     "MockPoseBackend",
+    "MEDIAPIPE_POSE_33",
+    "MediaPipePoseBackend",
     "ModelPreflightResult",
     "PoseBackend",
     "ProgressCallback",
