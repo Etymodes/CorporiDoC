@@ -80,6 +80,42 @@ CSV_HEADER = (
     "source",
 )
 
+POSE_CONNECTIONS = (
+    (0, 1),
+    (1, 2),
+    (2, 3),
+    (3, 7),
+    (0, 4),
+    (4, 5),
+    (5, 6),
+    (6, 8),
+    (9, 10),
+    (11, 12),
+    (11, 13),
+    (13, 15),
+    (15, 17),
+    (15, 19),
+    (15, 21),
+    (12, 14),
+    (14, 16),
+    (16, 18),
+    (16, 20),
+    (16, 22),
+    (11, 23),
+    (12, 24),
+    (23, 24),
+    (23, 25),
+    (25, 27),
+    (27, 29),
+    (29, 31),
+    (27, 31),
+    (24, 26),
+    (26, 28),
+    (28, 30),
+    (30, 32),
+    (28, 32),
+)
+
 RuntimeLoader = Callable[[], tuple[object, object, object]]
 
 
@@ -138,7 +174,12 @@ class MediaPipePoseBackend:
             request.output_directory / f"{request.request_id}-mediapipe-keypoints.csv"
         )
         partial_path = output_path.with_suffix(".csv.part")
+        video_path = request.output_directory / f"{request.request_id}-labeled.mp4"
+        video_partial_path = request.output_directory / (
+            f".{request.request_id}-labeled.partial.mp4"
+        )
         capture = None
+        video_writer = None
         processed_frames = 0
 
         try:
@@ -147,8 +188,10 @@ class MediaPipePoseBackend:
                 raise ValueError("；".join(errors))
             if request.backend != self.info:
                 raise ValueError("任务指定的后端或模型版本与当前 MediaPipe 后端不一致")
-            if set(request.requested_artifacts) != {ArtifactKind.KEYPOINTS}:
-                raise ValueError("当前 MediaPipe 后端只生成关键点 CSV")
+            requested = set(request.requested_artifacts)
+            supported = {ArtifactKind.KEYPOINTS, ArtifactKind.LABELED_VIDEO}
+            if ArtifactKind.KEYPOINTS not in requested or not requested <= supported:
+                raise ValueError("MediaPipe 任务必须生成关键点，可选同时生成骨架叠加视频")
             if _sha256_file(request.video_path) != request.video_sha256.lower():
                 raise ValueError("视频内容与登记的 SHA-256 不一致，已停止推理")
             preflight = check_mediapipe_preflight(self.model)
@@ -167,6 +210,10 @@ class MediaPipePoseBackend:
             fps = float(capture.get(cv2.CAP_PROP_FPS))
             total_frames = max(0, int(capture.get(cv2.CAP_PROP_FRAME_COUNT)))
             warnings = list(preflight.warnings)
+            if ArtifactKind.LABELED_VIDEO in requested:
+                warnings.append(
+                    "骨架叠加视频由 OpenCV 重新编码为无声恒定帧率 MP4；源视频保持不变"
+                )
             if fps <= 0:
                 fps = 25.0
                 warnings.append("视频未提供有效 FPS；时间戳暂按 25 FPS 生成")
@@ -209,9 +256,27 @@ class MediaPipePoseBackend:
                     image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
                     result = landmarker.detect_for_video(image, timestamp_ms)
 
+                    if ArtifactKind.LABELED_VIDEO in requested and video_writer is None:
+                        video_writer = cv2.VideoWriter(
+                            str(video_partial_path),
+                            cv2.VideoWriter_fourcc(*"mp4v"),
+                            fps,
+                            (width, height),
+                        )
+                        if not video_writer.isOpened():
+                            raise ValueError("无法创建骨架叠加视频；OpenCV MP4 编码器不可用")
+
                     if not result.pose_landmarks:
                         failed_frames += 1
                         _write_missing_pose(writer, processed_frames, timestamp_ms, fps)
+                        if video_writer is not None:
+                            _draw_pose_overlay(
+                                cv2,
+                                frame,
+                                (),
+                                self.model.file_sha256,
+                                processed_frames,
+                            )
                     else:
                         image_landmarks = result.pose_landmarks[0]
                         if len(image_landmarks) != len(MEDIAPIPE_POSE_33):
@@ -234,6 +299,16 @@ class MediaPipePoseBackend:
                             image_landmarks,
                             world_landmarks,
                         )
+                        if video_writer is not None:
+                            _draw_pose_overlay(
+                                cv2,
+                                frame,
+                                image_landmarks,
+                                self.model.file_sha256,
+                                processed_frames,
+                            )
+                    if video_writer is not None:
+                        video_writer.write(frame)
 
                     processed_frames += 1
                     if progress and (
@@ -262,12 +337,30 @@ class MediaPipePoseBackend:
                     f"视频登记为 {total_frames} 帧，实际只解码 {processed_frames} 帧"
                 )
 
+            if video_writer is not None:
+                video_writer.release()
+                video_writer = None
+                if not video_partial_path.is_file() or video_partial_path.stat().st_size == 0:
+                    raise ValueError("骨架叠加视频编码完成但文件为空")
+
+            artifacts = []
             partial_path.replace(output_path)
-            artifact = InferenceArtifact(
-                ArtifactKind.KEYPOINTS,
-                output_path,
-                _sha256_file(output_path),
+            artifacts.append(
+                InferenceArtifact(
+                    ArtifactKind.KEYPOINTS,
+                    output_path,
+                    _sha256_file(output_path),
+                )
             )
+            if ArtifactKind.LABELED_VIDEO in requested:
+                video_partial_path.replace(video_path)
+                artifacts.append(
+                    InferenceArtifact(
+                        ArtifactKind.LABELED_VIDEO,
+                        video_path,
+                        _sha256_file(video_path),
+                    )
+                )
             if progress and processed_frames != total_frames:
                 progress(
                     ProgressUpdate(processed_frames, processed_frames, "MediaPipe 推理完成")
@@ -278,11 +371,14 @@ class MediaPipePoseBackend:
                 started_at,
                 datetime.now(timezone.utc),
                 processed_frames=processed_frames,
-                artifacts=(artifact,),
+                artifacts=tuple(artifacts),
                 warnings=tuple(warnings),
             )
         except InferenceCancelled:
-            partial_path.unlink(missing_ok=True)
+            if video_writer is not None:
+                video_writer.release()
+                video_writer = None
+            _remove_partial_outputs(partial_path, video_partial_path)
             return InferenceResult(
                 request.request_id,
                 InferenceStatus.CANCELLED,
@@ -291,7 +387,15 @@ class MediaPipePoseBackend:
                 processed_frames=processed_frames,
             )
         except Exception as error:
-            partial_path.unlink(missing_ok=True)
+            if video_writer is not None:
+                video_writer.release()
+                video_writer = None
+            _remove_partial_outputs(
+                partial_path,
+                video_partial_path,
+                output_path,
+                video_path,
+            )
             return InferenceResult(
                 request.request_id,
                 InferenceStatus.FAILED,
@@ -303,6 +407,8 @@ class MediaPipePoseBackend:
         finally:
             if capture is not None:
                 capture.release()
+            if video_writer is not None:
+                video_writer.release()
 
 
 def _write_missing_pose(
@@ -386,6 +492,65 @@ def _load_mediapipe_runtime() -> tuple[object, object, object]:
     from mediapipe.tasks.python import vision
 
     return mp, task_python, vision
+
+
+def _draw_pose_overlay(
+    cv2: object,
+    frame: object,
+    landmarks: object,
+    model_sha256: str,
+    frame_index: int,
+) -> None:
+    height, width = frame.shape[:2]
+    points: dict[int, tuple[int, int]] = {}
+    for index, landmark in enumerate(landmarks):
+        visibility = float(getattr(landmark, "visibility", 0.0))
+        presence = float(getattr(landmark, "presence", 0.0))
+        if visibility < 0.5 or presence < 0.5:
+            continue
+        x = round(landmark.x * width)
+        y = round(landmark.y * height)
+        if not 0 <= x < width or not 0 <= y < height:
+            continue
+        points[index] = (x, y)
+
+    for start, end in POSE_CONNECTIONS:
+        if start in points and end in points:
+            cv2.line(frame, points[start], points[end], (40, 220, 220), 2, cv2.LINE_AA)
+    for index, point in points.items():
+        name = MEDIAPIPE_POSE_33[index]
+        color = (255, 140, 40) if name.startswith("left_") else (60, 90, 240)
+        if not name.startswith(("left_", "right_")):
+            color = (70, 210, 90)
+        cv2.circle(frame, point, 4, color, -1, cv2.LINE_AA)
+
+    status = "POSE DETECTED" if points else "NO POSE DETECTED"
+    status_color = (70, 210, 90) if points else (40, 40, 230)
+    cv2.putText(
+        frame,
+        f"CorporiDoC | {status} | frame {frame_index}",
+        (16, 28),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        status_color,
+        2,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame,
+        f"Model {model_sha256[:12]} | NOT CLINICALLY VALIDATED",
+        (16, 54),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (40, 220, 220),
+        1,
+        cv2.LINE_AA,
+    )
+
+
+def _remove_partial_outputs(*paths: Path) -> None:
+    for path in paths:
+        path.unlink(missing_ok=True)
 
 
 def _mediapipe_version() -> str:

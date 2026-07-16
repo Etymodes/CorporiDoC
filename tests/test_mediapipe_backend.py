@@ -9,6 +9,7 @@ import pytest
 
 from corporidoc.domain import ModelAsset
 from corporidoc.pose import (
+    ArtifactKind,
     InferenceRequest,
     InferenceStatus,
     MEDIAPIPE_POSE_33,
@@ -103,6 +104,21 @@ class FakeMediaPipe:
             self.values = values
 
 
+class FakeVideoWriter:
+    def __init__(self, path: str, *_: object) -> None:
+        self.path = Path(path)
+        self.path.write_bytes(b"fake labeled video")
+
+    def isOpened(self) -> bool:
+        return True
+
+    def write(self, _: object) -> None:
+        pass
+
+    def release(self) -> None:
+        pass
+
+
 def test_mediapipe_backend_exports_detected_and_missing_frames(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -135,16 +151,27 @@ def test_mediapipe_backend_exports_detected_and_missing_frames(
         video_sha256=video_hash,
         output_directory=tmp_path / "outputs",
         backend=backend.info,
+        requested_artifacts=(ArtifactKind.KEYPOINTS, ArtifactKind.LABELED_VIDEO),
         parameters=backend.parameters,
     )
     monkeypatch.setattr(importlib.util, "find_spec", lambda _: object())
     monkeypatch.setattr(cv2, "VideoCapture", FakeCapture)
     monkeypatch.setattr(cv2, "cvtColor", lambda frame, _: frame)
+    monkeypatch.setattr(cv2, "VideoWriter", FakeVideoWriter)
+    monkeypatch.setattr(cv2, "VideoWriter_fourcc", lambda *_: 0)
+    monkeypatch.setattr(cv2, "line", lambda *args: None)
+    monkeypatch.setattr(cv2, "circle", lambda *args: None)
+    monkeypatch.setattr(cv2, "putText", lambda *args: None)
 
     result = backend.analyze(request)
 
     assert result.status is InferenceStatus.SUCCEEDED
     assert result.processed_frames == 2
+    assert [artifact.kind for artifact in result.artifacts] == [
+        ArtifactKind.KEYPOINTS,
+        ArtifactKind.LABELED_VIDEO,
+    ]
+    assert result.artifacts[1].path.read_bytes() == b"fake labeled video"
     assert "1/2 帧未检出" in "；".join(result.warnings)
     with result.artifacts[0].path.open(newline="") as file:
         rows = list(csv.DictReader(file))
