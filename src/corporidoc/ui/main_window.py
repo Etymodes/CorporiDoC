@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from corporidoc.data import DuplicatePatientCodeError, PatientRepository
 from corporidoc.domain import Patient
 from corporidoc.ui.pose_tab import PoseTab
+from corporidoc.ui.settings_tab import SettingsTab
 from corporidoc.ui.video_tab import VideoTab
 
 
@@ -277,12 +278,8 @@ class MainWindow(QMainWindow):
             ),
             "报告",
         )
-        self.tabs.addTab(
-            PlaceholderTab(
-                "模型与系统设置", "管理模型版本、关键点规范、数据目录、运行设备与审计信息。"
-            ),
-            "设置",
-        )
+        self.settings_tab = SettingsTab(repository)
+        self.tabs.addTab(self.settings_tab, "设置")
         self.setCentralWidget(self.tabs)
 
         self.start_tab.register_requested.connect(self.patient_tab.add_patient)
