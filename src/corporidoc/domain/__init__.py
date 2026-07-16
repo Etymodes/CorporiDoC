@@ -1,6 +1,12 @@
 from corporidoc.domain.inference_run import InferenceArtifactRecord, InferenceRunRecord
 from corporidoc.domain.model_asset import ModelAsset
 from corporidoc.domain.patient import Patient
+from corporidoc.domain.time_alignment import (
+    SyncAnchor,
+    SyncMethod,
+    TimeAlignment,
+    fit_time_alignment,
+)
 from corporidoc.domain.video_asset import VideoAsset
 from corporidoc.domain.video_quality import (
     QUALITY_RULE_VERSION,
@@ -19,4 +25,8 @@ __all__ = [
     "VideoQualityAssessment",
     "assess_video_quality",
     "decode_quality_warnings",
+    "fit_time_alignment",
+    "SyncAnchor",
+    "SyncMethod",
+    "TimeAlignment",
 ]
