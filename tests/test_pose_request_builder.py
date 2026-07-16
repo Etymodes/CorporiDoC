@@ -32,10 +32,16 @@ def test_request_builder_prefers_managed_video(tmp_path: Path) -> None:
     managed.write_bytes(b"managed")
     backend = MockPoseBackend()
 
-    request = build_inference_request(video(source, managed), tmp_path / "data", backend.info)
+    request = build_inference_request(
+        video(source, managed),
+        tmp_path / "data",
+        backend.info,
+        parameters={"threshold": 0.5},
+    )
 
     assert request.video_path == managed.resolve()
     assert request.backend == backend.info
+    assert request.parameters == {"threshold": 0.5}
     assert request.output_directory == (
         (tmp_path / "data").resolve()
         / "patients"

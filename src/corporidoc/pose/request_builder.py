@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from pathlib import Path
 
 from corporidoc.data import resolve_video_playback_source
@@ -10,6 +11,7 @@ def build_inference_request(
     data_directory: Path,
     backend: BackendInfo,
     requested_artifacts: tuple[ArtifactKind, ...] = (ArtifactKind.KEYPOINTS,),
+    parameters: Mapping[str, object] | None = None,
 ) -> InferenceRequest:
     if video.id is None:
         raise ValueError("视频登记缺少数据库 ID")
@@ -17,7 +19,6 @@ def build_inference_request(
         raise ValueError("视频登记缺少有效患者 ID")
 
     playback_source = resolve_video_playback_source(video)
-    # ponytail: runs are files only; register them when inference-run persistence lands.
     output_directory = (
         Path(data_directory).expanduser().resolve()
         / "patients"
@@ -33,4 +34,5 @@ def build_inference_request(
         output_directory=output_directory,
         backend=backend,
         requested_artifacts=requested_artifacts,
+        parameters=parameters,
     )
