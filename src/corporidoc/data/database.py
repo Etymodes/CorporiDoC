@@ -12,6 +12,7 @@ from pathlib import Path
 from corporidoc.domain import (
     InferenceArtifactRecord,
     InferenceRunRecord,
+    ModelAsset,
     Patient,
     VideoAsset,
 )
@@ -23,6 +24,10 @@ class DuplicatePatientCodeError(ValueError):
 
 
 class DuplicateVideoError(ValueError):
+    pass
+
+
+class DuplicateModelError(ValueError):
     pass
 
 
@@ -130,6 +135,19 @@ class PatientRepository:
                     path TEXT NOT NULL,
                     sha256 TEXT NOT NULL,
                     UNIQUE(inference_run_id, kind, path)
+                );
+
+                CREATE TABLE IF NOT EXISTS model_assets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    backend_name TEXT NOT NULL,
+                    model_version TEXT NOT NULL,
+                    file_path TEXT NOT NULL UNIQUE,
+                    file_sha256 TEXT NOT NULL UNIQUE,
+                    file_size_bytes INTEGER NOT NULL,
+                    license_name TEXT NOT NULL,
+                    source_url TEXT NOT NULL,
+                    imported_at TEXT NOT NULL
                 );
                 """
             )
@@ -449,6 +467,86 @@ class PatientRepository:
             ).fetchone()
         assert row is not None
         return self._video_from_row(row)
+
+    @staticmethod
+    def _model_from_row(row: sqlite3.Row) -> ModelAsset:
+        return ModelAsset(**dict(row))
+
+    def list_model_assets(self) -> list[ModelAsset]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT * FROM model_assets ORDER BY imported_at DESC, id DESC"
+            ).fetchall()
+        return [self._model_from_row(row) for row in rows]
+
+    def create_model_asset(self, model: ModelAsset) -> ModelAsset:
+        required = {
+            "模型名称": model.name,
+            "后端名称": model.backend_name,
+            "模型版本": model.model_version,
+            "许可证": model.license_name,
+            "来源网址": model.source_url,
+        }
+        missing = [label for label, value in required.items() if not value.strip()]
+        if missing:
+            raise ValueError(f"模型登记缺少：{','.join(missing)}")
+        if len(model.file_sha256) != 64 or any(
+            character not in "0123456789abcdefABCDEF"
+            for character in model.file_sha256
+        ):
+            raise ValueError("模型 SHA-256 格式无效")
+
+        path = Path(model.file_path).expanduser().resolve()
+        try:
+            path.relative_to(self.database_path.parent.resolve())
+        except ValueError as error:
+            raise ValueError("模型文件必须位于应用数据目录内") from error
+        if not path.is_file():
+            raise ValueError("受管模型文件不存在或不是普通文件")
+        if path.stat().st_size != model.file_size_bytes:
+            raise ValueError("受管模型大小与登记记录不一致")
+        sha256 = model.file_sha256.lower()
+        if self._sha256_file(path) != sha256:
+            raise ValueError("受管模型 SHA-256 校验失败")
+
+        try:
+            with self._connection() as connection:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO model_assets (
+                        name, backend_name, model_version, file_path, file_sha256,
+                        file_size_bytes, license_name, source_url, imported_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        model.name.strip(),
+                        model.backend_name.strip(),
+                        model.model_version.strip(),
+                        str(path),
+                        sha256,
+                        model.file_size_bytes,
+                        model.license_name.strip(),
+                        model.source_url.strip(),
+                        self._now(),
+                    ),
+                )
+                model_id = int(cursor.lastrowid)
+                self._audit(
+                    connection,
+                    action="IMPORT_MODEL",
+                    entity_type="model_asset",
+                    entity_id=model_id,
+                    summary=f"backend={model.backend_name};sha256={sha256[:12]}",
+                )
+        except sqlite3.IntegrityError as error:
+            raise DuplicateModelError("该模型文件已经登记，未重复导入") from error
+
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM model_assets WHERE id = ?", (model_id,)
+            ).fetchone()
+        assert row is not None
+        return self._model_from_row(row)
 
     def create_inference_run(self, request: InferenceRequest) -> InferenceRunRecord:
         errors = request.validation_errors()

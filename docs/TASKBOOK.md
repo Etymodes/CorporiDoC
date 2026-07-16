@@ -1,6 +1,6 @@
 # CorporiDoC × TiantanDoC 开发任务书
 
-版本：0.4.4（Milestone 3）  
+版本：0.5.0（Milestone 4）  
 运行环境：`soma`（Python 3.10）  
 仓库：`Etymodes/CorporiDoC`
 
@@ -242,6 +242,12 @@ CorporiDoC 进程使用，多工作站任务租约将在部署里程碑实现。
 交付：人体预训练模型适配器、单人检测、关键点 CSV、叠加视频。  
 验收：对公开/获授权示例视频运行；显示逐点置信度；报告失败帧与遮挡；禁止使用真实患者视频入 Git。  
 提交：`Add human pose baseline`、`Export labeled pose video`。
+
+M4 第一小 Demo：采用 MediaPipe Pose Landmarker 作为 Apple Silicon 可运行的人体粗骨架基线，
+优先使用 full 模型；不由应用联网下载权重。用户选择的 `.task` 文件复制到受管 `models` 目录，
+以内容哈希命名并在复制后复核 SHA-256。SQLite 登记模型名称、后端、版本、文件大小、哈希、
+许可证和来源网址，导入动作写入审计。预检同时验证模型文件和 `mediapipe` Python 包，并固定
+显示“未针对 DoC 患者完成临床验证”的警告。下一小 Demo 增加设置页导入入口，再接真实逐帧推理。
 
 ### M5：DLC 自定义模型闭环
 

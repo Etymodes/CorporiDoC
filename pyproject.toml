@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "corporidoc"
-version = "0.4.4"
+version = "0.5.0"
 description = "Clinician-supervised video phenotyping for disorders of consciousness"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
@@ -21,6 +21,9 @@ dev = [
 pose = [
   "deeplabcut>=3.0,<3.2",
   "pandas>=2.2,<3",
+]
+human-pose = [
+  "mediapipe>=0.10.35,<0.11",
 ]
 
 [project.scripts]
