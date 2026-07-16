@@ -287,6 +287,7 @@ class MainWindow(QMainWindow):
             lambda: self.tabs.setCurrentWidget(self.patient_tab)
         )
         self.patient_tab.active_patient_changed.connect(self.set_active_patient)
+        self.settings_tab.models_changed.connect(self.pose_tab.refresh)
         self.pose_tab.task_idle.connect(self._finish_pending_close)
         self._close_when_pose_idle = False
         self.setStyleSheet(
@@ -317,7 +318,7 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.question(
             self,
             "姿态任务仍在运行",
-            "是否取消当前 Mock 姿态任务，并在清理完成后关闭？",
+            "是否取消当前姿态任务，并在清理完成后关闭？",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )

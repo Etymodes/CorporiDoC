@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -114,6 +115,8 @@ class ModelImportDialog(QDialog):
 
 
 class SettingsTab(QWidget):
+    models_changed = Signal()
+
     def __init__(self, repository: PatientRepository) -> None:
         super().__init__()
         self.repository = repository
@@ -164,6 +167,7 @@ class SettingsTab(QWidget):
             QMessageBox.warning(self, "无法导入模型", str(error))
             return
         self.refresh()
+        self.models_changed.emit()
         QMessageBox.information(
             self,
             "模型已登记",

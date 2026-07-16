@@ -18,14 +18,17 @@ from PySide6.QtWidgets import (
 )
 
 from corporidoc.data import PatientRepository, VideoPlaybackError
-from corporidoc.domain import Patient, VideoAsset
+from corporidoc.domain import ModelAsset, Patient, VideoAsset
 from corporidoc.pose import (
     CancellationToken,
     InferenceRequest,
     InferenceResult,
     InferenceStatus,
+    MediaPipePoseBackend,
     MockPoseBackend,
+    PoseBackend,
     ProgressUpdate,
+    check_mediapipe_preflight,
 )
 from corporidoc.pose.request_builder import build_inference_request
 
@@ -34,10 +37,15 @@ class PoseWorker(QObject):
     progress = Signal(object)
     finished = Signal(object)
 
-    def __init__(self, request: InferenceRequest, cancellation: CancellationToken) -> None:
+    def __init__(
+        self,
+        request: InferenceRequest,
+        backend: PoseBackend,
+        cancellation: CancellationToken,
+    ) -> None:
         super().__init__()
         self.request = request
-        self.backend = MockPoseBackend()
+        self.backend = backend
         self.cancellation = cancellation
 
     def run(self) -> None:
@@ -57,6 +65,7 @@ class PoseTab(QWidget):
         self.repository = repository
         self.active_patient: Patient | None = None
         self._videos: list[VideoAsset] = []
+        self._models: list[ModelAsset] = []
         self._thread: QThread | None = None
         self._worker: PoseWorker | None = None
         self._cancellation: CancellationToken | None = None
@@ -65,10 +74,12 @@ class PoseTab(QWidget):
         self.patient_label.setObjectName("activePatient")
         self.video_combo = QComboBox()
         self.video_combo.setMinimumWidth(360)
+        self.backend_combo = QComboBox()
+        self.backend_combo.currentIndexChanged.connect(self._update_notice)
         self.refresh_button = QPushButton("刷新视频")
         self.refresh_button.clicked.connect(self.refresh)
-        self.start_button = QPushButton("运行 Mock 姿态 Demo")
-        self.start_button.clicked.connect(self.start_mock_inference)
+        self.start_button = QPushButton("运行姿态分析")
+        self.start_button.clicked.connect(self.start_inference)
         self.cancel_button = QPushButton("取消任务")
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self.cancel_task)
@@ -76,16 +87,15 @@ class PoseTab(QWidget):
         controls = QHBoxLayout()
         controls.addWidget(QLabel("视频"))
         controls.addWidget(self.video_combo, 1)
+        controls.addWidget(QLabel("后端"))
+        controls.addWidget(self.backend_combo)
         controls.addWidget(self.refresh_button)
         controls.addWidget(self.start_button)
         controls.addWidget(self.cancel_button)
 
-        notice = QLabel(
-            "当前仅运行确定性 Mock：输出是软件测试用虚拟轨迹，不代表患者真实姿态，"
-            "不得进入临床判断或报告。"
-        )
-        notice.setWordWrap(True)
-        notice.setStyleSheet("color: #9a5b00;")
+        self.notice = QLabel()
+        self.notice.setWordWrap(True)
+        self.notice.setStyleSheet("color: #9a5b00;")
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
@@ -108,12 +118,14 @@ class PoseTab(QWidget):
         layout.setContentsMargins(32, 30, 32, 30)
         layout.addWidget(self.patient_label)
         layout.addLayout(controls)
-        layout.addWidget(notice)
+        layout.addWidget(self.notice)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.status_label)
         layout.addWidget(self.result_text, 1)
         layout.addWidget(QLabel("当前患者的近期任务"))
         layout.addWidget(self.history_table, 1)
+        self._refresh_backends()
+        self._update_notice()
         self._set_controls_enabled(False)
 
     @property
@@ -133,6 +145,7 @@ class PoseTab(QWidget):
     def refresh(self) -> None:
         if self.is_running:
             return
+        self._refresh_backends()
         self.video_combo.clear()
         if self.active_patient is None or self.active_patient.id is None:
             self._videos = []
@@ -150,10 +163,10 @@ class PoseTab(QWidget):
                 summary
             )
         self._set_controls_enabled(bool(self._videos))
-        self.status_label.setText("请选择视频并运行 Mock 姿态 Demo" if self._videos else "当前患者无视频")
+        self.status_label.setText("请选择视频和姿态后端" if self._videos else "当前患者无视频")
         self._refresh_history()
 
-    def start_mock_inference(self) -> None:
+    def start_inference(self) -> None:
         if self.is_running:
             return
         row = self.video_combo.currentIndex()
@@ -161,12 +174,13 @@ class PoseTab(QWidget):
             QMessageBox.information(self, "未选择视频", "请先选择一条视频登记记录。")
             return
 
-        backend = MockPoseBackend()
         try:
+            backend = self._selected_backend()
             request = build_inference_request(
                 self._videos[row],
                 self.repository.database_path.parent,
                 backend.info,
+                parameters=getattr(backend, "parameters", None),
             )
         except (VideoPlaybackError, ValueError) as error:
             QMessageBox.warning(self, "无法创建姿态任务", str(error))
@@ -181,7 +195,7 @@ class PoseTab(QWidget):
 
         thread = QThread(self)
         cancellation = CancellationToken()
-        worker = PoseWorker(request, cancellation)
+        worker = PoseWorker(request, backend, cancellation)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.progress.connect(self._update_progress)
@@ -195,12 +209,13 @@ class PoseTab(QWidget):
         self._cancellation = cancellation
 
         self.video_combo.setEnabled(False)
+        self.backend_combo.setEnabled(False)
         self.refresh_button.setEnabled(False)
         self.start_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.progress_bar.setRange(0, 0)
         self.result_text.clear()
-        self.status_label.setText(f"Mock 任务运行中 · {request.request_id}")
+        self.status_label.setText(f"姿态任务运行中 · {backend.info.name} · {request.request_id}")
         thread.start()
 
     def cancel_task(self) -> None:
@@ -233,11 +248,20 @@ class PoseTab(QWidget):
                 f"- {artifact.kind.value}: {artifact.path}\n  SHA-256: {artifact.sha256}"
                 for artifact in result.artifacts
             ]
-            self.status_label.setText("Mock 任务成功（非临床结果）")
+            backend_label = (
+                "Mock 软件测试任务完成"
+                if self._worker and self._worker.backend.info.name == "corporidoc-mock"
+                else "MediaPipe 任务完成（必须人工复核）"
+            )
+            warning_lines = [f"- {warning}" for warning in result.warnings]
+            self.status_label.setText(backend_label)
             self.result_text.setPlainText(
                 f"任务：{result.request_id}\n"
                 f"终态：{result.status.value}\n"
                 f"处理帧数：{result.processed_frames}\n"
+                "警告：\n"
+                + ("\n".join(warning_lines) if warning_lines else "- 无")
+                + "\n"
                 "产物：\n"
                 + "\n".join(artifact_lines)
             )
@@ -251,7 +275,7 @@ class PoseTab(QWidget):
             self.result_text.setPlainText(
                 f"任务：{result.request_id}\n终态：failed\n错误：{result.error_message}"
             )
-            QMessageBox.warning(self, "Mock 姿态任务失败", result.error_message)
+            QMessageBox.warning(self, "姿态任务失败", result.error_message)
 
     def _record_persistence_failure(
         self,
@@ -315,8 +339,44 @@ class PoseTab(QWidget):
             for column, value in enumerate(values):
                 self.history_table.setItem(row, column, QTableWidgetItem(value))
 
+    def _refresh_backends(self) -> None:
+        selected_model_id = self.backend_combo.currentData()
+        self._models = self.repository.list_model_assets()
+        self.backend_combo.clear()
+        self.backend_combo.addItem("Mock（软件测试）", None)
+        for model in self._models:
+            self.backend_combo.addItem(f"{model.name} · {model.model_version}", model.id)
+        if selected_model_id is not None:
+            index = self.backend_combo.findData(selected_model_id)
+            if index >= 0:
+                self.backend_combo.setCurrentIndex(index)
+
+    def _selected_backend(self) -> PoseBackend:
+        model_id = self.backend_combo.currentData()
+        if model_id is None:
+            return MockPoseBackend()
+        model = next((item for item in self._models if item.id == model_id), None)
+        if model is None:
+            raise ValueError("所选模型登记已不存在，请刷新后重试")
+        preflight = check_mediapipe_preflight(model)
+        if not preflight.ready:
+            raise ValueError("；".join(preflight.errors))
+        return MediaPipePoseBackend(model)
+
+    def _update_notice(self) -> None:
+        if self.backend_combo.currentData() is None:
+            self.notice.setText(
+                "Mock 输出是软件测试用虚拟轨迹，不代表患者真实姿态，不得进入临床判断。"
+            )
+            return
+        self.notice.setText(
+            "MediaPipe 是通用单人人体姿态工程基线，并非 DoC 临床模型。"
+            "未检出、低可见度和遮挡结果必须结合源视频人工复核。"
+        )
+
     def _set_controls_enabled(self, enabled: bool) -> None:
         self.video_combo.setEnabled(enabled)
+        self.backend_combo.setEnabled(enabled)
         self.refresh_button.setEnabled(self.active_patient is not None)
         self.start_button.setEnabled(enabled)
         self.cancel_button.setEnabled(False)
