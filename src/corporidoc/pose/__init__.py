@@ -12,6 +12,10 @@ from corporidoc.pose.contracts import (
     ProgressUpdate,
 )
 from corporidoc.pose.mock_backend import MockPoseBackend
+from corporidoc.pose.model_preflight import (
+    ModelPreflightResult,
+    check_mediapipe_preflight,
+)
 
 __all__ = [
     "ArtifactKind",
@@ -23,7 +27,9 @@ __all__ = [
     "InferenceResult",
     "InferenceStatus",
     "MockPoseBackend",
+    "ModelPreflightResult",
     "PoseBackend",
     "ProgressCallback",
     "ProgressUpdate",
+    "check_mediapipe_preflight",
 ]
