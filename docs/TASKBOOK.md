@@ -1,6 +1,6 @@
 # CorporiDoC × TiantanDoC 开发任务书
 
-版本：0.5.0（Milestone 4）  
+版本：0.5.1（Milestone 4）  
 运行环境：`soma`（Python 3.10）  
 仓库：`Etymodes/CorporiDoC`
 
@@ -248,6 +248,11 @@ M4 第一小 Demo：采用 MediaPipe Pose Landmarker 作为 Apple Silicon 可运
 以内容哈希命名并在复制后复核 SHA-256。SQLite 登记模型名称、后端、版本、文件大小、哈希、
 许可证和来源网址，导入动作写入审计。预检同时验证模型文件和 `mediapipe` Python 包，并固定
 显示“未针对 DoC 患者完成临床验证”的警告。下一小 Demo 增加设置页导入入口，再接真实逐帧推理。
+
+M4 第二小 Demo：“设置”标签页可选择本地 `.task` 文件并填写名称、版本、许可证和来源网址；
+默认提供官方 full 模型地址与模型卡所列 Apache-2.0 许可证。导入后显示短哈希、时间和实时预检
+状态。预检失败不会删除模型登记，便于区分“依赖未安装”和“模型文件损坏”；下一小 Demo 由
+姿态页选择已登记且预检通过的模型运行真实关键点导出。
 
 ### M5：DLC 自定义模型闭环
 
