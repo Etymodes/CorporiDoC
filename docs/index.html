@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#087d3d">
+  <meta name="description" content="CorporiDoC · TiantanDoC 意识障碍患者视频行为研究平台">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; media-src 'self' blob:">
+  <title>CorporiDoC · TiantanDoC</title>
+  <style>
+:root {
+  color-scheme: light;
+  --green-900: #07572d;
+  --green-700: #087d3d;
+  --green-500: #12a34f;
+  --green-100: #e8f7ee;
+  --ink: #183027;
+  --muted: #5f7169;
+  --line: #dce9e1;
+  --paper: #ffffff;
+  --wash: #f3f8f5;
+  --danger: #c51f2a;
+  --shadow: 0 12px 34px rgb(7 87 45 / 10%);
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: linear-gradient(145deg, #f8fbf9 0%, var(--wash) 100%);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+}
+
+button, input, select, textarea { font: inherit; }
+button, .bottom-nav a, .module-card { -webkit-tap-highlight-color: transparent; }
+
+button {
+  border: 0;
+  border-radius: 12px;
+  padding: 0.72rem 1rem;
+  background: var(--green-700);
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:hover { background: var(--green-900); }
+button.secondary { border: 1px solid var(--line); background: white; color: var(--green-900); }
+.hidden { display: none !important; }
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 68px;
+  padding: 0.55rem max(1rem, calc((100vw - 1120px) / 2));
+  border-bottom: 1px solid rgb(220 233 225 / 85%);
+  background: rgb(255 255 255 / 92%);
+  backdrop-filter: blur(16px);
+}
+
+.brand { display: flex; align-items: center; gap: 0.65rem; color: inherit; text-decoration: none; }
+.brand svg { width: 50px; height: 50px; border-radius: 13px; object-fit: cover; }
+.brand span { display: grid; line-height: 1.05; }
+.brand strong { color: var(--green-900); font-size: 1.12rem; }
+.brand small { margin-top: 0.28rem; color: var(--muted); }
+
+.research-warning {
+  padding: 0.65rem 1rem;
+  background: #fff7df;
+  color: #684c00;
+  text-align: center;
+  font-size: 0.86rem;
+}
+
+main { width: min(1120px, calc(100% - 2rem)); margin: 1.5rem auto 7rem; }
+.view { display: none; }
+.view.active { display: block; animation: appear 180ms ease-out; }
+@keyframes appear { from { opacity: 0; transform: translateY(4px); } }
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.hero { display: grid; grid-template-columns: minmax(220px, 36%) 1fr; align-items: center; overflow: hidden; }
+.hero > svg { width: 100%; aspect-ratio: 1; object-fit: cover; }
+.hero > div { padding: clamp(1.4rem, 5vw, 3.6rem); padding-left: 1rem; }
+.hero h1 { max-width: 15em; margin: 0.25rem 0 0.75rem; font-size: clamp(1.8rem, 4vw, 3.2rem); line-height: 1.15; }
+.hero p:not(.eyebrow) { max-width: 42rem; color: var(--muted); line-height: 1.7; }
+.eyebrow { margin: 0; color: var(--green-700); font-size: 0.78rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.65rem; margin-top: 1.2rem; }
+
+.active-patient { display: grid; gap: 0.2rem; margin-top: 1rem; padding: 1rem 1.25rem; border-left: 5px solid var(--green-500); box-shadow: none; }
+.active-patient span, .active-patient small { color: var(--muted); }
+.active-patient strong { font-size: 1.15rem; }
+
+.module-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1rem; }
+.module-card {
+  display: grid;
+  gap: 0.4rem;
+  min-height: 116px;
+  padding: 1.2rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--paper);
+  color: var(--ink);
+  text-align: left;
+  box-shadow: none;
+}
+.module-card:hover { border-color: var(--green-500); background: var(--green-100); }
+.module-card b { color: var(--green-900); font-size: 1.25rem; }
+.module-card span { color: var(--muted); font-weight: 500; line-height: 1.45; }
+
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 0.5rem 0 1rem; }
+.section-heading h2 { margin: 0.2rem 0 0; font-size: clamp(1.7rem, 4vw, 2.4rem); }
+.badge { border-radius: 999px; padding: 0.35rem 0.7rem; background: var(--green-100); color: var(--green-900); font-size: 0.8rem; font-weight: 800; }
+.privacy-note { border-radius: 12px; padding: 0.75rem 0.9rem; background: #fff7df; color: #684c00; font-size: 0.86rem; line-height: 1.5; }
+
+.patient-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.8rem; }
+.patient-card { display: grid; gap: 0.75rem; padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: 16px; background: white; }
+.patient-card.current { border-color: var(--green-500); box-shadow: 0 0 0 2px rgb(18 163 79 / 12%); }
+.patient-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.patient-card h3 { margin: 0; color: var(--green-900); }
+.patient-card p { margin: 0.25rem 0 0; color: var(--muted); }
+.patient-card .card-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.patient-card .card-actions button { padding: 0.55rem 0.75rem; font-size: 0.86rem; }
+.empty { color: var(--muted); text-align: center; padding: 3rem 1rem; }
+
+.placeholder { padding: clamp(1.2rem, 4vw, 2rem); box-shadow: none; }
+.placeholder h3, .settings-grid h3 { margin-top: 0; color: var(--green-900); }
+.placeholder p, .settings-grid p { color: var(--muted); line-height: 1.7; }
+.settings-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+.settings-grid article { padding: 1.2rem; box-shadow: none; }
+
+.bottom-nav {
+  position: fixed;
+  z-index: 30;
+  right: 50%;
+  bottom: max(0.75rem, env(safe-area-inset-bottom));
+  display: flex;
+  gap: 0.2rem;
+  width: min(760px, calc(100% - 1rem));
+  padding: 0.38rem;
+  overflow-x: auto;
+  transform: translateX(50%);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 16px 46px rgb(7 87 45 / 18%);
+  backdrop-filter: blur(18px);
+}
+.bottom-nav a { flex: 1 0 auto; min-width: 68px; border-radius: 12px; padding: 0.72rem 0.75rem; color: var(--muted); text-align: center; text-decoration: none; font-size: 0.85rem; font-weight: 700; }
+.bottom-nav a.active { background: var(--green-100); color: var(--green-900); }
+
+dialog { width: min(560px, calc(100% - 1.2rem)); border: 0; border-radius: 20px; padding: 0; box-shadow: 0 24px 80px rgb(0 0 0 / 25%); }
+dialog::backdrop { background: rgb(8 24 16 / 55%); backdrop-filter: blur(3px); }
+dialog form { display: grid; gap: 0.9rem; padding: 1.25rem; }
+.dialog-heading, .dialog-actions { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
+.dialog-heading h2 { margin: 0; }
+.icon-button { width: 2.3rem; height: 2.3rem; padding: 0; border-radius: 50%; background: var(--wash); color: var(--ink); font-size: 1.45rem; }
+label { display: grid; gap: 0.35rem; color: var(--muted); font-size: 0.88rem; font-weight: 700; }
+input, select, textarea { width: 100%; border: 1px solid #c8d9cf; border-radius: 10px; padding: 0.72rem; background: white; color: var(--ink); }
+input:focus, select:focus, textarea:focus { outline: 2px solid rgb(18 163 79 / 25%); border-color: var(--green-500); }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.dialog-actions { justify-content: flex-end; }
+
+@media (max-width: 760px) {
+  main { width: min(100% - 1rem, 680px); margin-top: 0.75rem; }
+  .app-header { padding-inline: 0.75rem; }
+  .research-warning { text-align: left; }
+  .hero { grid-template-columns: 1fr; }
+  .hero > svg { width: min(72%, 330px); margin: 0 auto; }
+  .hero > div { padding: 0 1.2rem 1.5rem; }
+  .module-grid, .settings-grid, .patient-list { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 430px) {
+  .brand svg { width: 44px; height: 44px; }
+  .brand small { display: none; }
+  .section-heading { align-items: flex-end; }
+  .form-row { grid-template-columns: 1fr; }
+  .module-grid { gap: 0.65rem; }
+  .module-card { min-height: 94px; }
+}
+
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="#home" aria-label="CorporiDoC 首页">
+      <svg viewBox="0 0 160 160" role="img" aria-label="CorporiDoC 手臂、大脑与行为轨迹图标">
+  <circle cx="80" cy="80" r="72" fill="#f4fbf7" stroke="#0b8b45" stroke-width="5"/>
+  <path d="M30 92c13-9 21-16 29-28 5-8 12-6 11 4l-3 22c-1 9 5 17 14 18l24 1c13 1 22-6 26-18" fill="none" stroke="#0b8b45" stroke-width="7" stroke-linecap="round"/>
+  <path d="M57 64c-11-7-19-13-26-21m27 20L42 34m18 28L54 31" fill="none" stroke="#0b8b45" stroke-width="6" stroke-linecap="round"/>
+  <path d="M83 46c0-10 10-17 20-13 7-8 21-4 22 7 11 3 14 16 6 24 2 10-10 18-19 12-8 8-22 4-22-7-12-1-15-17-6-23z" fill="none" stroke="#0b8b45" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M101 35c-5 8 3 13 0 21m12-19c6 5 5 13 0 18m-20 1c8-5 18-2 22 5" fill="none" stroke="#0b8b45" stroke-width="3.5" stroke-linecap="round"/>
+  <circle cx="134" cy="108" r="6" fill="#d5222a"/><circle cx="126" cy="119" r="3.5" fill="#0b8b45"/><circle cx="117" cy="128" r="2.5" fill="#0b8b45"/>
+</svg>
+      <span><strong>CorporiDoC</strong><small>TiantanDoC</small></span>
+    </a>
+  </header>
+
+  <aside class="research-warning">
+    研究原型：自动结果必须由临床人员结合源视频复核，不得单独用于诊断或治疗决策。
+  </aside>
+
+  <main>
+    <section id="home" class="view active" data-view="home">
+      <div class="hero panel">
+        <svg viewBox="0 0 160 160" role="img" aria-label="CorporiDoC 手臂、大脑与行为轨迹图标">
+  <circle cx="80" cy="80" r="72" fill="#f4fbf7" stroke="#0b8b45" stroke-width="5"/>
+  <path d="M30 92c13-9 21-16 29-28 5-8 12-6 11 4l-3 22c-1 9 5 17 14 18l24 1c13 1 22-6 26-18" fill="none" stroke="#0b8b45" stroke-width="7" stroke-linecap="round"/>
+  <path d="M57 64c-11-7-19-13-26-21m27 20L42 34m18 28L54 31" fill="none" stroke="#0b8b45" stroke-width="6" stroke-linecap="round"/>
+  <path d="M83 46c0-10 10-17 20-13 7-8 21-4 22 7 11 3 14 16 6 24 2 10-10 18-19 12-8 8-22 4-22-7-12-1-15-17-6-23z" fill="none" stroke="#0b8b45" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M101 35c-5 8 3 13 0 21m12-19c6 5 5 13 0 18m-20 1c8-5 18-2 22 5" fill="none" stroke="#0b8b45" stroke-width="3.5" stroke-linecap="round"/>
+  <circle cx="134" cy="108" r="6" fill="#d5222a"/><circle cx="126" cy="119" r="3.5" fill="#0b8b45"/><circle cx="117" cy="128" r="2.5" fill="#0b8b45"/>
+</svg>
+        <div>
+          <p class="eyebrow">Clinician-supervised video phenotyping</p>
+          <h1>意识障碍患者视频行为研究平台</h1>
+          <p>在手机、MacBook 与 Augusta 上使用同一套功能入口；视频分析仍优先在本地设备完成。</p>
+          <div class="actions">
+            <button id="home-register" type="button">注册患者</button>
+            <button class="secondary" type="button" data-go="patients">切换患者</button>
+          </div>
+        </div>
+      </div>
+
+      <section class="active-patient panel" aria-live="polite">
+        <span>当前患者</span>
+        <strong id="active-patient-name">尚未选择</strong>
+        <small id="active-patient-detail">请先注册或切换患者</small>
+      </section>
+
+      <section class="module-grid" aria-label="功能模块">
+        <button class="module-card" type="button" data-go="patients"><b>患者</b><span>注册、切换与修改资料</span></button>
+        <button class="module-card" type="button" data-go="video"><b>视频</b><span>导入、质控与采集记录</span></button>
+        <button class="module-card" type="button" data-go="pose"><b>姿态</b><span>自动/半自动关键点与轨迹</span></button>
+        <button class="module-card" type="button" data-go="assessment"><b>评估</b><span>刺激—反应与 Video-EEG 对齐</span></button>
+        <button class="module-card" type="button" data-go="reports"><b>报告</b><span>勾选模块后组合导出</span></button>
+        <button class="module-card" type="button" data-go="settings"><b>设置</b><span>模型、数据边界与设备</span></button>
+      </section>
+    </section>
+
+    <section id="patients" class="view" data-view="patients">
+      <div class="section-heading">
+        <div><p class="eyebrow">Patient registry</p><h2>患者管理</h2></div>
+        <button id="add-patient" type="button">注册患者</button>
+      </div>
+      <p class="privacy-note">此 Demo 只把去标识化资料保存在当前浏览器，不会上传到 GitHub，也不会自动同步到其他设备。</p>
+      <div id="patient-list" class="patient-list"></div>
+      <p id="patient-empty" class="empty">尚无患者记录。</p>
+    </section>
+
+    <section id="video" class="view" data-view="video">
+      <div class="section-heading"><div><p class="eyebrow">Video intake</p><h2>视频</h2></div><span class="badge">Web M1</span></div>
+      <div class="placeholder panel"><h3>下一小 Demo</h3><p>选择本机视频、读取基础元数据、记录机位/侧别/协议，并明确显示“仅本机处理”。</p></div>
+    </section>
+
+    <section id="pose" class="view" data-view="pose">
+      <div class="section-heading"><div><p class="eyebrow">Pose estimation</p><h2>姿态</h2></div><span class="badge">Web M2</span></div>
+      <div class="placeholder panel"><h3>浏览器工程基线</h3><p>先接入 MediaPipe Web/WASM 进行单人 33 点姿态预测；DLC、MMPose 与专病模型交给本地或受控计算节点。</p></div>
+    </section>
+
+    <section id="assessment" class="view" data-view="assessment">
+      <div class="section-heading"><div><p class="eyebrow">Time-locked assessment</p><h2>评估</h2></div><span class="badge">Web M3</span></div>
+      <div class="placeholder panel"><h3>刺激—行为—EEG 对齐</h3><p>登记同步锚点、任务事件和临床复核结论；网页只做交互与展示，原始 EEG 不进入公开静态站点。</p></div>
+    </section>
+
+    <section id="reports" class="view" data-view="reports">
+      <div class="section-heading"><div><p class="eyebrow">Traceable export</p><h2>报告</h2></div><span class="badge">Web M4</span></div>
+      <div class="placeholder panel"><h3>组合报告</h3><p>按患者、视频、任务和算法版本勾选生成结构化报告、关键点 CSV、标记视频与轨迹视频。</p></div>
+    </section>
+
+    <section id="settings" class="view" data-view="settings">
+      <div class="section-heading"><div><p class="eyebrow">System boundary</p><h2>设置</h2></div></div>
+      <div class="settings-grid">
+        <article class="panel"><h3>当前存储</h3><p>浏览器本机存储；无跨设备同步。</p></article>
+        <article class="panel"><h3>公开站点边界</h3><p>GitHub Pages 仅发布前端代码和静态资源，禁止提交患者资料、视频、模型权重或报告。</p></article>
+        <article class="panel"><h3>后端目标</h3><p>医院/课题组受控服务器，提供登录、权限、审计、加密同步和计算任务队列。</p></article>
+      </div>
+    </section>
+  </main>
+
+  <nav class="bottom-nav" aria-label="主导航">
+    <a class="active" href="#home" data-nav="home">首页</a>
+    <a href="#patients" data-nav="patients">患者</a>
+    <a href="#video" data-nav="video">视频</a>
+    <a href="#pose" data-nav="pose">姿态</a>
+    <a href="#assessment" data-nav="assessment">评估</a>
+    <a href="#reports" data-nav="reports">报告</a>
+    <a href="#settings" data-nav="settings">设置</a>
+  </nav>
+
+  <dialog id="patient-dialog">
+    <form id="patient-form" method="dialog">
+      <div class="dialog-heading"><h2 id="patient-dialog-title">注册患者</h2><button class="icon-button" type="button" data-dialog-close aria-label="关闭">×</button></div>
+      <input id="patient-id" type="hidden">
+      <label>研究编号 *<input id="patient-code" autocomplete="off" required maxlength="40"></label>
+      <label>显示名/别名<input id="display-name" autocomplete="off" maxlength="60"></label>
+      <div class="form-row">
+        <label>性别<select id="sex"><option>未知</option><option>女</option><option>男</option><option>其他</option></select></label>
+        <label>当前临床分类<select id="diagnosis"><option>待评估</option><option>昏迷</option><option>UWS/VS</option><option>MCS-</option><option>MCS+</option><option>EMCS</option></select></label>
+      </div>
+      <label>病因<input id="etiology" autocomplete="off" maxlength="100"></label>
+      <label>备注<textarea id="notes" rows="3" maxlength="500"></textarea></label>
+      <p class="privacy-note">不要录入姓名、身份证号、住址、电话等直接身份信息。</p>
+      <div class="dialog-actions"><button class="secondary" type="button" data-dialog-close>取消</button><button id="save-patient" type="submit">保存</button></div>
+    </form>
+  </dialog>
+
+  <script>
+const STORAGE_KEY = "cpdoc.patients.v1";
+const ACTIVE_KEY = "cpdoc.activePatient.v1";
+const views = [...document.querySelectorAll(".view")];
+const navItems = [...document.querySelectorAll("[data-nav]")];
+const dialog = document.querySelector("#patient-dialog");
+const form = document.querySelector("#patient-form");
+const patientList = document.querySelector("#patient-list");
+const patientEmpty = document.querySelector("#patient-empty");
+
+function readPatients() {
+  try {
+    const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePatients(patients) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(patients));
+}
+
+function activePatientId() {
+  return localStorage.getItem(ACTIVE_KEY) || "";
+}
+
+function setActivePatient(id) {
+  localStorage.setItem(ACTIVE_KEY, id);
+  renderPatients();
+  renderActivePatient();
+}
+
+function showView(name) {
+  const target = views.some((view) => view.dataset.view === name) ? name : "home";
+  views.forEach((view) => view.classList.toggle("active", view.dataset.view === target));
+  navItems.forEach((item) => item.classList.toggle("active", item.dataset.nav === target));
+  if (location.hash !== `#${target}`) history.replaceState(null, "", `#${target}`);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function patientTitle(patient) {
+  return patient.displayName ? `${patient.code} · ${patient.displayName}` : patient.code;
+}
+
+function renderActivePatient() {
+  const patient = readPatients().find((item) => item.id === activePatientId());
+  document.querySelector("#active-patient-name").textContent = patient
+    ? patientTitle(patient)
+    : "尚未选择";
+  document.querySelector("#active-patient-detail").textContent = patient
+    ? `${patient.diagnosis} · ${patient.etiology || "病因未记录"}`
+    : "请先注册或切换患者";
+}
+
+function makeButton(text, className, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = text;
+  if (className) button.className = className;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function renderPatients() {
+  const patients = readPatients();
+  const currentId = activePatientId();
+  patientList.replaceChildren();
+  patientEmpty.classList.toggle("hidden", patients.length > 0);
+
+  patients.forEach((patient) => {
+    const card = document.createElement("article");
+    card.className = `patient-card${patient.id === currentId ? " current" : ""}`;
+    const header = document.createElement("header");
+    const text = document.createElement("div");
+    const title = document.createElement("h3");
+    const detail = document.createElement("p");
+    const marker = document.createElement("span");
+    title.textContent = patientTitle(patient);
+    detail.textContent = `${patient.diagnosis} · ${patient.sex} · ${patient.etiology || "病因未记录"}`;
+    marker.className = "badge";
+    marker.textContent = patient.id === currentId ? "当前" : "本机";
+    text.append(title, detail);
+    header.append(text, marker);
+
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
+    actions.append(
+      makeButton("切换", "", () => setActivePatient(patient.id)),
+      makeButton("修改", "secondary", () => openPatientDialog(patient)),
+    );
+    card.append(header, actions);
+    patientList.append(card);
+  });
+}
+
+function openPatientDialog(patient = null) {
+  document.querySelector("#patient-dialog-title").textContent = patient ? "修改患者资料" : "注册患者";
+  document.querySelector("#patient-id").value = patient?.id || "";
+  document.querySelector("#patient-code").value = patient?.code || "";
+  document.querySelector("#patient-code").setCustomValidity("");
+  document.querySelector("#display-name").value = patient?.displayName || "";
+  document.querySelector("#sex").value = patient?.sex || "未知";
+  document.querySelector("#diagnosis").value = patient?.diagnosis || "待评估";
+  document.querySelector("#etiology").value = patient?.etiology || "";
+  document.querySelector("#notes").value = patient?.notes || "";
+  dialog.showModal();
+  document.querySelector("#patient-code").focus();
+}
+
+function savePatient() {
+  const id = document.querySelector("#patient-id").value;
+  const code = document.querySelector("#patient-code").value.trim();
+  if (!code) return;
+  const patients = readPatients();
+  const duplicate = patients.some((patient) => patient.code.toLowerCase() === code.toLowerCase() && patient.id !== id);
+  if (duplicate) {
+    document.querySelector("#patient-code").setCustomValidity("研究编号已经存在");
+    document.querySelector("#patient-code").reportValidity();
+    return;
+  }
+  document.querySelector("#patient-code").setCustomValidity("");
+  const value = {
+    id: id || (crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`),
+    code,
+    displayName: document.querySelector("#display-name").value.trim(),
+    sex: document.querySelector("#sex").value,
+    diagnosis: document.querySelector("#diagnosis").value,
+    etiology: document.querySelector("#etiology").value.trim(),
+    notes: document.querySelector("#notes").value.trim(),
+    updatedAt: new Date().toISOString(),
+  };
+  const index = patients.findIndex((patient) => patient.id === value.id);
+  if (index >= 0) patients[index] = value;
+  else patients.unshift(value);
+  writePatients(patients);
+  if (!activePatientId()) localStorage.setItem(ACTIVE_KEY, value.id);
+  dialog.close();
+  renderPatients();
+  renderActivePatient();
+  showView("patients");
+}
+
+document.querySelectorAll("[data-go]").forEach((button) => {
+  button.addEventListener("click", () => showView(button.dataset.go));
+});
+document.querySelector("#home-register").addEventListener("click", () => openPatientDialog());
+document.querySelector("#add-patient").addEventListener("click", () => openPatientDialog());
+document.querySelectorAll("[data-dialog-close]").forEach((button) => {
+  button.addEventListener("click", () => dialog.close());
+});
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (form.reportValidity()) savePatient();
+});
+window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
+
+
+
+renderPatients();
+renderActivePatient();
+showView(location.hash.slice(1) || "home");
+
+  </script>
+</body>
+</html>
