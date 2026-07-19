@@ -5,8 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#087d3d">
   <meta name="description" content="CorporiDoC · TiantanDoC 意识障碍患者视频行为研究平台">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; media-src 'self' blob:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'unsafe-inline'; script-src 'self' 'unsafe-inline'; worker-src 'self'; connect-src 'self'; media-src 'self' blob:">
   <title>CorporiDoC · TiantanDoC</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="./icon-192.png">
   <style>
 :root {
   color-scheme: light;
@@ -219,6 +222,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid rgb(18 163 79 / 2
 </svg>
       <span><strong>CorporiDoC</strong><small>TiantanDoC</small></span>
     </a>
+    <button id="install-button" class="secondary hidden" type="button">安装到本机</button>
   </header>
 
   <aside class="research-warning">
@@ -308,9 +312,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid rgb(18 163 79 / 2
     <section id="settings" class="view" data-view="settings">
       <div class="section-heading"><div><p class="eyebrow">System boundary</p><h2>设置</h2></div></div>
       <div class="settings-grid">
-        <article class="panel"><h3>当前存储</h3><p>浏览器本机存储；无跨设备同步。</p></article>
+        <article class="panel"><h3>当前存储</h3><p id="storage-status">正在读取本机存储占用…</p><p id="offline-status">正在准备离线缓存…</p></article>
         <article class="panel"><h3>公开站点边界</h3><p>GitHub Pages 仅发布前端代码和静态资源，禁止提交患者资料、视频、模型权重或报告。</p></article>
-        <article class="panel"><h3>后端目标</h3><p>医院/课题组受控服务器，提供登录、权限、审计、加密同步和计算任务队列。</p></article>
+        <article class="panel"><h3>本地优先</h3><p>每台设备独立保存资料和视频；不自动同步。手机安装后可离线启动。</p></article>
       </div>
     </section>
   </main>
@@ -355,6 +359,8 @@ const patientEmpty = document.querySelector("#patient-empty");
 const videoForm = document.querySelector("#video-form");
 const videoList = document.querySelector("#video-list");
 const videoEmpty = document.querySelector("#video-empty");
+const installButton = document.querySelector("#install-button");
+let installPrompt = null;
 
 function openVideoDatabase() {
   return new Promise((resolve, reject) => {
@@ -404,6 +410,16 @@ function formatDuration(seconds) {
   if (!Number.isFinite(seconds)) return "时长未知";
   const total = Math.round(seconds);
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+async function updateStorageStatus() {
+  const target = document.querySelector("#storage-status");
+  if (!navigator.storage?.estimate) {
+    target.textContent = "当前浏览器不提供存储占用信息。";
+    return;
+  }
+  const { usage = 0, quota = 0 } = await navigator.storage.estimate();
+  target.textContent = `已使用 ${formatBytes(usage)} / 可用配额 ${formatBytes(quota)}；数据仅保存在本设备。`;
 }
 
 function readPatients() {
@@ -637,11 +653,39 @@ videoForm.addEventListener("submit", async (event) => {
 });
 window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
 
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  installPrompt = event;
+  installButton.classList.remove("hidden");
+});
+installButton.addEventListener("click", async () => {
+  if (!installPrompt) return;
+  await installPrompt.prompt();
+  installPrompt = null;
+  installButton.classList.add("hidden");
+});
+window.addEventListener("appinstalled", () => installButton.classList.add("hidden"));
 
+const offlineStatus = document.querySelector("#offline-status");
+const canUseServiceWorker = "serviceWorker" in navigator
+  && (location.protocol === "https:" || ["localhost", "127.0.0.1"].includes(location.hostname));
+if (canUseServiceWorker) {
+  window.addEventListener("load", async () => {
+    try {
+      await navigator.serviceWorker.register("./sw.js");
+      offlineStatus.textContent = "离线缓存已启用；首次完整加载后可断网启动。";
+    } catch (error) {
+      offlineStatus.textContent = `离线缓存启用失败：${error.message}`;
+    }
+  });
+} else {
+  offlineStatus.textContent = "当前地址不支持离线安装，请使用 HTTPS 正式网址。";
+}
 
 renderPatients();
 renderActivePatient();
 renderVideos();
+updateStorageStatus();
 showView(location.hash.slice(1) || "home");
 
   </script>
