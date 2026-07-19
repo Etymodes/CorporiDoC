@@ -136,6 +136,17 @@ main { width: min(1120px, calc(100% - 2rem)); margin: 1.5rem auto 7rem; }
 .patient-card .card-actions button { padding: 0.55rem 0.75rem; font-size: 0.86rem; }
 .empty { color: var(--muted); text-align: center; padding: 3rem 1rem; }
 
+.video-intake { display: grid; gap: 1rem; padding: 1.1rem; box-shadow: none; }
+.video-intake .form-row { align-items: end; }
+.video-intake button { justify-self: start; }
+.video-list { display: grid; gap: 0.75rem; margin-top: 1rem; }
+.video-card { display: grid; gap: 0.7rem; padding: 1rem; border: 1px solid var(--line); border-radius: 16px; background: white; }
+.video-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.video-card h3 { margin: 0; overflow-wrap: anywhere; color: var(--green-900); }
+.video-card p { margin: 0.3rem 0 0; color: var(--muted); line-height: 1.45; }
+.video-card footer { display: flex; justify-content: flex-end; }
+.video-card .danger { border: 1px solid #f0c9cc; background: white; color: var(--danger); }
+
 .placeholder { padding: clamp(1.2rem, 4vw, 2rem); box-shadow: none; }
 .placeholder h3, .settings-grid h3 { margin-top: 0; color: var(--green-900); }
 .placeholder p, .settings-grid p { color: var(--muted); line-height: 1.7; }
@@ -264,7 +275,19 @@ input:focus, select:focus, textarea:focus { outline: 2px solid rgb(18 163 79 / 2
 
     <section id="video" class="view" data-view="video">
       <div class="section-heading"><div><p class="eyebrow">Video intake</p><h2>视频</h2></div><span class="badge">Web M1</span></div>
-      <div class="placeholder panel"><h3>下一小 Demo</h3><p>选择本机视频、读取基础元数据、记录机位/侧别/协议，并明确显示“仅本机处理”。</p></div>
+      <p class="privacy-note">视频会复制进当前浏览器的受管存储，不会上传 GitHub。浏览器清站点数据会删除这些副本；跨设备同步尚未实现。</p>
+      <form id="video-form" class="video-intake panel">
+        <label>选择视频 *<input id="video-file" type="file" accept="video/*" required></label>
+        <div class="form-row">
+          <label>机位<select id="camera-view"><option>未记录</option><option>正面</option><option>左侧</option><option>右侧</option><option>俯视</option><option>其他</option></select></label>
+          <label>观察侧别<select id="body-side"><option>未记录</option><option>双侧</option><option>左侧</option><option>右侧</option><option>不适用</option></select></label>
+        </div>
+        <label>采集协议<input id="capture-protocol" maxlength="100" placeholder="例如：CRS-R 指令反应"></label>
+        <label>备注<textarea id="video-notes" rows="2" maxlength="500"></textarea></label>
+        <button id="import-video" type="submit">复制并登记视频</button>
+      </form>
+      <div id="video-list" class="video-list"></div>
+      <p id="video-empty" class="empty">请先选择患者，再登记视频。</p>
     </section>
 
     <section id="pose" class="view" data-view="pose">
@@ -322,12 +345,66 @@ input:focus, select:focus, textarea:focus { outline: 2px solid rgb(18 163 79 / 2
   <script>
 const STORAGE_KEY = "cpdoc.patients.v1";
 const ACTIVE_KEY = "cpdoc.activePatient.v1";
+const VIDEO_DB = "cpdoc.videos.v1";
 const views = [...document.querySelectorAll(".view")];
 const navItems = [...document.querySelectorAll("[data-nav]")];
 const dialog = document.querySelector("#patient-dialog");
 const form = document.querySelector("#patient-form");
 const patientList = document.querySelector("#patient-list");
 const patientEmpty = document.querySelector("#patient-empty");
+const videoForm = document.querySelector("#video-form");
+const videoList = document.querySelector("#video-list");
+const videoEmpty = document.querySelector("#video-empty");
+
+function openVideoDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(VIDEO_DB, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("videos", { keyPath: "id" });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function videoStoreRequest(mode, action) {
+  const database = await openVideoDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction("videos", mode);
+    const request = action(transaction.objectStore("videos"));
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => database.close();
+  });
+}
+
+const readVideos = () => videoStoreRequest("readonly", (store) => store.getAll());
+const writeVideo = (video) => videoStoreRequest("readwrite", (store) => store.put(video));
+const deleteVideo = (id) => videoStoreRequest("readwrite", (store) => store.delete(id));
+
+function probeVideo(file) {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    const url = URL.createObjectURL(file);
+    const finish = (value, error = null) => {
+      URL.revokeObjectURL(url);
+      error ? reject(error) : resolve(value);
+    };
+    video.preload = "metadata";
+    video.onloadedmetadata = () => finish({ duration: video.duration, width: video.videoWidth, height: video.videoHeight });
+    video.onerror = () => finish(null, new Error("无法读取视频元数据"));
+    video.src = url;
+  });
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds)) return "时长未知";
+  const total = Math.round(seconds);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
 
 function readPatients() {
   try {
@@ -350,6 +427,7 @@ function setActivePatient(id) {
   localStorage.setItem(ACTIVE_KEY, id);
   renderPatients();
   renderActivePatient();
+  renderVideos();
 }
 
 function showView(name) {
@@ -415,6 +493,48 @@ function renderPatients() {
   });
 }
 
+async function renderVideos() {
+  const patientId = activePatientId();
+  videoList.replaceChildren();
+  if (!patientId) {
+    videoEmpty.textContent = "请先选择患者，再登记视频。";
+    videoEmpty.classList.remove("hidden");
+    return;
+  }
+  try {
+    const videos = (await readVideos()).filter((video) => video.patientId === patientId);
+    videoEmpty.textContent = "当前患者尚无视频记录。";
+    videoEmpty.classList.toggle("hidden", videos.length > 0);
+    videos.sort((left, right) => right.importedAt.localeCompare(left.importedAt));
+    videos.forEach((video) => {
+      const card = document.createElement("article");
+      card.className = "video-card";
+      const header = document.createElement("header");
+      const text = document.createElement("div");
+      const title = document.createElement("h3");
+      const detail = document.createElement("p");
+      const badge = document.createElement("span");
+      title.textContent = video.fileName;
+      detail.textContent = `${video.width}×${video.height} · ${formatDuration(video.duration)} · ${formatBytes(video.size)} · ${video.cameraView}/${video.bodySide}`;
+      badge.className = "badge";
+      badge.textContent = "浏览器副本";
+      text.append(title, detail);
+      header.append(text, badge);
+      const footer = document.createElement("footer");
+      footer.append(makeButton("删除记录和副本", "danger", async () => {
+        if (!confirm(`删除 ${video.fileName} 的登记记录和浏览器副本？原始文件不会被修改。`)) return;
+        await deleteVideo(video.id);
+        renderVideos();
+      }));
+      card.append(header, footer);
+      videoList.append(card);
+    });
+  } catch (error) {
+    videoEmpty.textContent = `无法读取浏览器视频存储：${error.message}`;
+    videoEmpty.classList.remove("hidden");
+  }
+}
+
 function openPatientDialog(patient = null) {
   document.querySelector("#patient-dialog-title").textContent = patient ? "修改患者资料" : "注册患者";
   document.querySelector("#patient-id").value = patient?.id || "";
@@ -474,12 +594,54 @@ form.addEventListener("submit", (event) => {
   event.preventDefault();
   if (form.reportValidity()) savePatient();
 });
+videoForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const patientId = activePatientId();
+  if (!patientId) {
+    alert("请先注册或切换患者");
+    showView("patients");
+    return;
+  }
+  const file = document.querySelector("#video-file").files[0];
+  if (!file) return;
+  const button = document.querySelector("#import-video");
+  button.disabled = true;
+  button.textContent = "正在复制…";
+  try {
+    const existing = (await readVideos()).some((video) => video.patientId === patientId && video.fileName === file.name && video.size === file.size && video.lastModified === file.lastModified);
+    if (existing) throw new Error("当前患者已登记这个视频");
+    const metadata = await probeVideo(file);
+    await writeVideo({
+      id: crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`,
+      patientId,
+      fileName: file.name,
+      mimeType: file.type,
+      size: file.size,
+      lastModified: file.lastModified,
+      importedAt: new Date().toISOString(),
+      cameraView: document.querySelector("#camera-view").value,
+      bodySide: document.querySelector("#body-side").value,
+      captureProtocol: document.querySelector("#capture-protocol").value.trim(),
+      notes: document.querySelector("#video-notes").value.trim(),
+      ...metadata,
+      blob: file,
+    });
+    videoForm.reset();
+    await renderVideos();
+  } catch (error) {
+    alert(`视频登记失败：${error.message}`);
+  } finally {
+    button.disabled = false;
+    button.textContent = "复制并登记视频";
+  }
+});
 window.addEventListener("hashchange", () => showView(location.hash.slice(1)));
 
 
 
 renderPatients();
 renderActivePatient();
+renderVideos();
 showView(location.hash.slice(1) || "home");
 
   </script>
