@@ -1,4 +1,4 @@
-const CACHE = "corporidoc-web-m2a-v2";
+const CACHE = "corporidoc-web-m2a-v3";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", (event) => {
